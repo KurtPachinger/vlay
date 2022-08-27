@@ -186,8 +186,8 @@ let vlay = {
     // raycast at cubemap through vertices
     for (let i = 0; i < pos.count; i++) {
       v.pointer.fromBufferAttribute(pos, i)
-      // jitter fractional amount
-      v.pointer.multiply(new THREE.Vector3(1.001, 1, 1))
+      const jitter = 1.001
+      v.pointer.multiply(new THREE.Vector3(jitter, jitter, jitter))
       v.raycast.set(ctr, dir.subVectors(v.pointer, ctr).normalize())
 
       const intersects = v.raycast.intersectObjects(opts.group.children, false)
@@ -216,10 +216,10 @@ let vlay = {
         pos.setXYZ(i, disp.x, disp.y, disp.z)
         // mantle (crust, core)
         // BVH-CSG cavities, extreme peak/valley
-        let face = String(intersect.faceIndex).padStart(5, '0')
+        let face = String(intersect.faceIndex).padStart(3, '0')
         let dist = v.pointer.distanceTo(intersect.point).toFixed(3)
         let xyz = disp.x.toFixed(3) + ',' + disp.y.toFixed(3) + ',' + disp.z.toFixed(3)
-        let defect = [dist, opts.p, xyz].join('|')
+        let defect = [dist, opts.p, xyz, face].join('|')
 
         // defect tolerance
         if (mantle[face] === undefined) {
@@ -237,42 +237,61 @@ let vlay = {
     vlay.clear(blurs)
   },
   defects: function (group) {
-    // face defects to mesh for CSG
-    // cavity, roi, contour, landmark
-    const mantle = group.userData.mantle
-    //
-    Object.keys(mantle).forEach(function (f) {
-      // defects minimum
-      mantle[f].length <= 3 && delete mantle[f]
-    })
+    // face defects to mesh and CSG
 
-    console.log('MANTLE', mantle)
-    // fitline: count.type[depth]
+    const userData = group.userData
+    // fit roi contour to landmark type
     let fit = {
-      pos: false,
-      neg: false,
-      set: { dots: [4, 8, 4], path: [4, 4, 2] }
+      pos: 0,
+      neg: 0,
+      cluster: { c: 0 }
     }
-    for (var faces of Object.keys(mantle)) {
-      // sort distance and de-dupe
-      let defects = mantle[faces].sort()
-      defects = mantle[faces] = [...new Set(defects)]
 
+    Object.keys(userData.mantle).forEach(function (face) {
+      // sort face distance and de-dupe
+      let defects = userData.mantle[face].sort().reverse()
+      defects = [...new Set(defects)]
       // limit segments
-      let delta = Math.floor(defects.length / 6)
+      let delta = Math.ceil(defects.length / 6)
       delta = Math.max(delta, 1)
+      let seg = []
+      for (let i = 0; i < defects.length; i += delta) {
+        seg.push(defects[i])
+        // feature type ratio
+        let feat = defects[i].slice(-3)
+        fit[feat]++
+      }
+      userData.mantle[face] = seg
+      // minimum defects
+      if (defects.length < 3) {
+        delete userData.mantle[face]
+      }
+    })
+    // sort overall distance
+    userData.mantle = Object.values(userData.mantle).sort().reverse()
+    fit.cluster.c = fit.neg / (fit.neg + fit.pos).toFixed(3)
+    fit.pos = fit.neg = false
+
+    console.log('defects', userData.mantle)
+    for (var face of Object.keys(userData.mantle)) {
+      let defects = userData.mantle[face]
 
       // parse defect
-      let feat = defects[Math.floor(defects.length / 2)]
-      feat = feat.split('|')
-      feat = feat[feat.length - 1]
-      console.log('feat', feat)
+      let cluster = 0
+
       // === 'core' ? 'pos' : 'neg'
       let coord = []
       let depth = []
-      for (let i = 0; i < defects.length; i = i + delta) {
+      for (let i = 0; i < defects.length; i++) {
         // 'dist|p|x,y,z|type'
         let defect = defects[i].split('|')
+
+        let feat = defect[defect.length - 1]
+
+        if (feat === 'neg') {
+          cluster++
+        }
+
         let point = defect[2]
         point = point.split(',')
         point = new THREE.Vector3(+point[0], +point[1], +point[2])
@@ -283,8 +302,11 @@ let vlay = {
         // xyz for curve mesh
         coord.push(point)
         // dist for vertex color
-        depth.push({ d: defect[i] / v.R, t: defect[defect.length - 1] })
+        depth.push({ d: defect[0] / v.R, t: defect[defect.length - 1] })
       }
+
+      cluster = cluster / defects.length
+      let feat = cluster < fit.cluster.c ? 'pos' : 'neg'
 
       // curve defects geometry and color
       topo(coord, feat, depth)
@@ -303,11 +325,10 @@ let vlay = {
 
     // CSG tube/s
     function topo(coord, feat, depth) {
-      let mult = feat === 'pos' ? coord.length : 1
+      let loop = feat === 'pos' ? coord.length : 1
       let geo
 
-      if (feat === 'pos') {
-      } else {
+      if (feat === 'neg') {
         const curve = new THREE.CatmullRomCurve3(coord)
         const extrude = {
           steps: 8,
@@ -318,7 +339,7 @@ let vlay = {
         const pts1 = [],
           count = 5
         for (let i = 0; i < count; i++) {
-          const l = 1 * mult
+          const l = 1 * loop
           const a = ((2 * i) / count) * Math.PI
           pts1.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
         }
@@ -329,15 +350,12 @@ let vlay = {
 
       // OUTPUT
 
-      for (let i = 0; i < mult; i++) {
+      for (let i = 0; i < loop; i++) {
         if (feat === 'pos') {
           let pt = coord[i]
-          geo = new THREE.BoxGeometry(1, 1, 1)
-
-          let d = 1 + depth[i].d
-          geo.scale(d, d, d)
-          let r = d * v.R
-          geo.translate(pt.x * r, pt.y * r, pt.z * r)
+          let d = 1 + depth[i].d * 2
+          geo = new THREE.BoxGeometry(d, d, d)
+          geo.translate(pt.x, pt.y, pt.z)
         }
 
         //
@@ -347,6 +365,9 @@ let vlay = {
         let merge = fit[feat] ? fit[feat] : geo
         if (fit[feat]) {
           merge = mergeBufferGeometries([fit[feat], geo], false)
+          fit.cluster[feat]++
+        } else {
+          fit.cluster[feat] = 1
         }
         fit[feat] = merge
       }
@@ -371,10 +392,8 @@ let vlay = {
       }
     }
     //
-
+    console.log('fit', fit)
     // OUTPUT
-    console.log(mantle, fit)
-
     group.add(pos, neg)
     vlay.var.neg = neg
   },
@@ -670,10 +689,6 @@ const GUI = () => {
         })
       },
       transient: false
-    },
-    mode: {
-      value: 'linear',
-      options: ['point', 'linear', 'connected']
     }
   })
 }
