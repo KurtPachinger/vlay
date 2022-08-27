@@ -1,10 +1,11 @@
+import './styles.scss'
 import * as THREE from 'three'
 import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { useState, useLayoutEffect } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Reflector } from '@react-three/drei'
 import { useControls } from 'leva'
-import { Subtraction, Brush } from '@react-three/csg'
+import { Brush, Subtraction, Addition } from '@react-three/csg'
 //
 
 let v
@@ -42,20 +43,26 @@ let vlay = {
     }
 
     // MAP PROC-GEN ELEVATION
-    v.m_terrain = new THREE.MeshStandardMaterial({
-      color: 0x80c0ff,
-      //flatShading: true,
-      vertexColors: true,
-      metalness: 0.25,
-      roughness: 0.5
-    })
-    v.m_terrain.name = 'terrain'
+    // csg elevate (TEST)
     v.m_vertex = new THREE.MeshStandardMaterial({
-      transparent: true,
-      opacity: 0.5,
-      blending: THREE.MultiplyBlending
+      name: 'vertex',
+      color: 0xc08080,
+      vertexColors: true,
+      metalness: 0.33,
+      roughness: 0.66
     })
     v.m_vertex.name = 'vertex'
+    // csg cavity
+    v.m_cavity = new THREE.MeshPhongMaterial({
+      name: 'cavity',
+      color: 0x8080c0,
+      vertexColors: true,
+      flatShading: true,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.FrontSide,
+      shadowSide: THREE.FrontSide
+    })
 
     // RAY-TEST LAYERS
     v.raycast = new THREE.Raycaster()
@@ -66,89 +73,95 @@ let vlay = {
 
     // PROC-GEN
     vlay.proc()
-
     return v.scene
   },
-  proc: function (opts = { p: vlay.set.proc, id: 'noise' }) {
-    console.log('proc', opts.p)
+  proc: async function (opts = { p: vlay.set.proc, id: 'noise' }) {
+    let promise = new Promise((resolve, reject) => {
+      console.log('proc', opts.p)
 
-    if (!opts.r) {
-      // RESET
-      opts.r = true
-      vlay.clear(opts.id, true)
-      // id and cubemap
-      // if not, hide cubemap
-      v.group.children.forEach(function (group) {
-        if (group.name !== opts.id) {
-          group.visible = false
-        }
-      })
+      if (!opts.r) {
+        // RESET
+        opts.r = true
+        vlay.clear(opts.id, true)
+        // id and cubemap
+        // if not, hide cubemap
+        v.group.children.forEach(function (group) {
+          if (group.name !== opts.id) {
+            group.visible = false
+          }
+        })
 
-      // GROUP
-      opts.group = new THREE.Group()
-      opts.group.name = opts.id
-      v.group.add(opts.group)
-      // MANTLE
-      opts.group.userData.mantle = {}
+        // GROUP
+        opts.group = new THREE.Group()
+        opts.group.name = opts.id
+        v.group.add(opts.group)
+        // MANTLE
+        opts.group.userData.mantle = {}
 
-      // CUBEMAP
-      let map = vlay.set.cubemap && opts.cubemap ? opts.cubemap : 0
-      opts.cubemap = vlay.cubemap(map, opts)
-      let cubemap = new THREE.Mesh(v.boxsphere, opts.cubemap)
-      cubemap.name = 'cubemap'
-      opts.group.add(cubemap)
-      v.m_cubemap = opts.cubemap
+        // CUBEMAP
+        let map = vlay.set.cubemap && opts.cubemap ? opts.cubemap : 0
+        opts.cubemap = vlay.cubemap(map, opts)
+        let cubemap = new THREE.Mesh(v.boxsphere, opts.cubemap)
+        cubemap.name = 'cubemap'
+        opts.group.add(cubemap)
+        v.m_cubemap = opts.cubemap
 
-      // ELEVATE, max subdivide
-      opts.elevate = new THREE.IcosahedronGeometry(v.R, 6)
-      opts.max = opts.elevate.attributes.position.count * 8
-    }
-
-    if (opts.p > 0) {
-      // MESH SUBDIVIDE
-      //opts.elevate.computeBoundingSphere()
-      //let BS = opts.elevate.boundingSphere.radius
-      //const subdivide = new TessellateModifier(BS / 3, 2)
-      //opts.elevate = subdivide.modify(opts.elevate)
-
-      // displace
-      vlay.rays(opts)
-
-      if (opts.p > 1) {
-        // MESH SIMPLIFY
-        // overwrites geometry uv/color attributes
-        //const simplify = new SimplifyModifier()
-        //let count = opts.elevate.attributes.position.count
-        //if (count > opts.max) {
-        //  count = count - opts.max
-        //  opts.elevate = simplify.modify(opts.elevate, count * 0.975)
-        //}
+        // ELEVATE, max subdivide
+        opts.elevate = new THREE.IcosahedronGeometry(v.R, 6)
+        opts.max = opts.elevate.attributes.position.count * 8
       }
 
-      // recursion
-      opts.p--
-      vlay.proc(opts)
-    } else {
-      console.log('PROC DONE')
-      // ELEVATE
-      let elevate = new THREE.Mesh(opts.elevate, v.m_terrain)
-      elevate.name = 'elevate'
-      elevate.castShadow = true
-      elevate.receiveShadow = true
-      opts.group.add(elevate)
-      //for CSG
-      vlay.var.elevate = elevate
+      if (opts.p > 0) {
+        // MESH SUBDIVIDE
+        //opts.elevate.computeBoundingSphere()
+        //let BS = opts.elevate.boundingSphere.radius
+        //const subdivide = new TessellateModifier(BS / 3, 2)
+        //opts.elevate = subdivide.modify(opts.elevate)
 
-      // MANTLE DEFECTS
-      vlay.defects(opts.group)
-    }
+        // displace
+        vlay.rays(opts)
+
+        if (opts.p > 1) {
+          // MESH SIMPLIFY
+          // overwrites geometry uv/color attributes
+          //const simplify = new SimplifyModifier()
+          //let count = opts.elevate.attributes.position.count
+          //if (count > opts.max) {
+          //  count = count - opts.max
+          //  opts.elevate = simplify.modify(opts.elevate, count * 0.975)
+          //}
+        }
+
+        // recursion
+        opts.p--
+        vlay.proc(opts)
+      } else {
+        console.log('PROC DONE')
+        // ELEVATE
+        let elevate = new THREE.Mesh(opts.elevate, v.m_vertex)
+        elevate.name = 'elevate'
+        //elevate.castShadow = true
+        //elevate.receiveShadow = true
+        //opts.group.add(elevate)
+        //for CSG
+        v.elevate = elevate
+
+        // MANTLE DEFECTS
+        vlay.defects(opts.group)
+
+        resolve('done!')
+      }
+    })
+
+    let result = await promise
   },
   rays: function (opts) {
+    let blurs = []
     //console.log('rays', opts)
 
     // cubemap PYR attenuate/convolute
     let target = opts.group.getObjectByName('cubemap').material
-    let blurs = []
+
     let k = vlay.set.proc - opts.p + 1
     for (let i = 0; i < target.length; i++) {
       let material = target[i].map.source.data
@@ -204,17 +217,18 @@ let vlay = {
         // mantle (crust, core)
         // BVH-CSG cavities, extreme peak/valley
         let face = String(intersect.faceIndex).padStart(5, '0')
-        let dist = v.pointer.distanceTo(intersect.point)
-        let xyz = disp.x + ',' + disp.y + ',' + disp.z
+        let dist = v.pointer.distanceTo(intersect.point).toFixed(3)
+        let xyz = disp.x.toFixed(3) + ',' + disp.y.toFixed(3) + ',' + disp.z.toFixed(3)
         let defect = [dist, opts.p, xyz].join('|')
 
+        // defect tolerance
         if (mantle[face] === undefined) {
           mantle[face] = []
         }
-        if (dist < v.R * 0.125) {
-          mantle[face].push(defect + '|crust')
-        } else if (dist > v.R * 0.33) {
-          mantle[face].push(defect + '|core')
+        if (dist < v.R * 0.2) {
+          mantle[face].push(defect + '|pos')
+        } else if (dist < v.R * 0.4) {
+          mantle[face].push(defect + '|neg')
         }
       }
     }
@@ -226,21 +240,34 @@ let vlay = {
     // face defects to mesh for CSG
     // cavity, roi, contour, landmark
     const mantle = group.userData.mantle
+    //
+    Object.keys(mantle).forEach(function (f) {
+      // defects minimum
+      mantle[f].length <= 3 && delete mantle[f]
+    })
 
-    let features = false
+    console.log('MANTLE', mantle)
+    // fitline: count.type[depth]
+    let fit = {
+      pos: false,
+      neg: false,
+      set: { dots: [4, 8, 4], path: [4, 4, 2] }
+    }
     for (var faces of Object.keys(mantle)) {
       // sort distance and de-dupe
       let defects = mantle[faces].sort()
       defects = mantle[faces] = [...new Set(defects)]
-      if (defects.length < 4) {
-        // minimum points
-        continue
-      }
 
       // limit segments
       let delta = Math.floor(defects.length / 6)
       delta = Math.max(delta, 1)
+
       // parse defect
+      let feat = defects[Math.floor(defects.length / 2)]
+      feat = feat.split('|')
+      feat = feat[feat.length - 1]
+      console.log('feat', feat)
+      // === 'core' ? 'pos' : 'neg'
       let coord = []
       let depth = []
       for (let i = 0; i < defects.length; i = i + delta) {
@@ -250,26 +277,83 @@ let vlay = {
         point = point.split(',')
         point = new THREE.Vector3(+point[0], +point[1], +point[2])
 
-        if (i === 0 || i === defects.length - 1) {
-          // exaggerate furthest point for CSG clearance
-          point.multiplyScalar(1.5)
-        } else if (i === Math.round(defects.length / 2)) {
-          // halfway point to origin
-          //point.multiplyScalar(0.5)
-        }
-        // output
+        // path from center to outside
+        point.multiplyScalar(i / (defects.length - 1) + 0.33)
+
+        // xyz for curve mesh
         coord.push(point)
-        // normal distance from feature to hull
-        depth.push({ d: defect[0] / v.R, t: defect[defect.length - 1] })
+        // dist for vertex color
+        depth.push({ d: defect[i] / v.R, t: defect[defect.length - 1] })
       }
-      //console.log('curve',curve)
 
-      // geometry from face defects
-      const curve = new THREE.CatmullRomCurve3(coord)
-      const geo = new THREE.TubeGeometry(curve, 16, 2, 6, false)
+      // curve defects geometry and color
+      topo(coord, feat, depth)
+    }
 
+    // cavities buffer geometry to mesh
+    //fitline = mergeVertices(fitline, 0.5)
+    let fitline = new THREE.PlaneGeometry(1, 1)
+
+    let neg = new THREE.Mesh(fit.neg || fitline, v.m_cavity)
+    neg.name = 'neg'
+    let pos = new THREE.Mesh(fit.pos || fitline, v.m_vertex)
+    pos.name = 'pos'
+    pos.castShadow = true
+    pos.receiveShadow = true
+
+    // CSG tube/s
+    function topo(coord, feat, depth) {
+      let mult = feat === 'pos' ? coord.length : 1
+      let geo
+
+      if (feat === 'pos') {
+      } else {
+        const curve = new THREE.CatmullRomCurve3(coord)
+        const extrude = {
+          steps: 8,
+          bevelEnabled: false,
+          extrudePath: curve
+        }
+
+        const pts1 = [],
+          count = 5
+        for (let i = 0; i < count; i++) {
+          const l = 1 * mult
+          const a = ((2 * i) / count) * Math.PI
+          pts1.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
+        }
+
+        const ellipsoid = new THREE.Shape(pts1)
+        geo = new THREE.ExtrudeGeometry(ellipsoid, extrude)
+      }
+
+      // OUTPUT
+
+      for (let i = 0; i < mult; i++) {
+        if (feat === 'pos') {
+          let pt = coord[i]
+          geo = new THREE.BoxGeometry(1, 1, 1)
+
+          let d = 1 + depth[i].d
+          geo.scale(d, d, d)
+          let r = d * v.R
+          geo.translate(pt.x * r, pt.y * r, pt.z * r)
+        }
+
+        //
+        colors(geo, depth)
+
+        // merge geometry with previous
+        let merge = fit[feat] ? fit[feat] : geo
+        if (fit[feat]) {
+          merge = mergeBufferGeometries([fit[feat], geo], false)
+        }
+        fit[feat] = merge
+      }
+    }
+
+    function colors(geo, depth) {
       // colors
-      /*
       let pos = geo.getAttribute('position')
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       let col = geo.getAttribute('color')
@@ -285,68 +369,14 @@ let vlay = {
 
         col.setXYZ(i, 1 - d, s, s)
       }
-      */
-
-      // merge geometry with previous
-      let merge = features ? features : geo
-      if (features) {
-        merge = mergeBufferGeometries([features, geo], false)
-        //merge = mergeVertices(merge, 0.001)
-      }
-      features = merge
     }
-
-    const mat = new THREE.MeshPhongMaterial({
-      side: THREE.DoubleSide,
-      color: 0xc080ff,
-      //vertexColors: true,
-      flatShading: true
-    })
-    // cavities buffer geometry to mesh
-    let cavity = new THREE.Mesh(features, mat)
-    cavity.castShadow = true
-
-    // CSG tube/s
-    //const closedSpline = new THREE.CatmullRomCurve3(curve)
-    //closedSpline.curveType = 'catmullrom'
-    //closedSpline.closed = true
-    //const extrude = {
-    //  steps: 128,
-    //  bevelEnabled: false,
-    //  extrudePath: closedSpline
-    //}
-
-    const pts1 = [],
-      count = 6
-    for (let i = 0; i < count; i++) {
-      const l = 2
-      const a = ((2 * i) / count) * Math.PI
-      pts1.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
-    }
-
-    //const ellipsoid = new THREE.Shape(pts1)
-    //const geo = new THREE.ExtrudeGeometry(ellipsoid, extrude)
-    //const mat = new THREE.MeshLambertMaterial({
-    //  color: 0xc00000,
-    //  emissive: 0x400000,
-    //  wireframe: false,
-    //  side: THREE.DoubleSide,
-    //  flatShading: true
-    //})
-
-    //let cavities = new THREE.Mesh(geo, mat)
-    //cavities.castShadow = true
-
     //
 
     // OUTPUT
-    console.log('mantle', mantle)
+    console.log(mantle, fit)
 
-    let csg = new THREE.Group()
-    csg.name = 'csg'
-    csg.add(cavity)
-    group.add(csg)
-    vlay.var.csg = cavity
+    group.add(pos, neg)
+    vlay.var.neg = neg
   },
   cubemap: function (num, opts) {
     function noise(canvas) {
@@ -386,7 +416,7 @@ let vlay = {
         canvas.id = canvas.title = 'rnd_' + v.ref[i][0] + '_' + ts
         canvas.width = canvas.height = 8
         terrain = noise(canvas)
-        fragment.appendChild(canvas) //should be documentFragment
+        fragment.appendChild(canvas)
       } else {
         terrain = new THREE.CanvasTexture(num[i][1])
       }
@@ -482,7 +512,6 @@ let vlay = {
       }
     }
   },
-
   click: function (e) {
     let files = e.target.files
     //console.log(files);
@@ -572,19 +601,18 @@ export default function App(props) {
   return (
     <Canvas shadows frameloop="demand" camera={{ position: [0, v.R * 4, v.R * 4] }}>
       <OrbitControls makeDefault />
-      <pointLight intensity={10} position={[0, v.R * 8, v.R * 8]} castShadow />
-      <pointLight intensity={20} decay={4} position={[0, v.R / 4, 0]} castShadow />
+      <pointLight intensity={6} position={[0, v.R * 8, v.R * 8]} castShadow />
+      <pointLight intensity={4} decay={v.R * 16} position={[0, v.R / 2, 0]} castShadow />
       <gridHelper args={[v.R * 8, 8]} position={[0, -0.1, 0]} />
       <Ground receiveShadow mirror={1} blur={[256, 256]} mixBlur={4} mixStrength={0.25} rotation={[-Math.PI / 2, 0, Math.PI / 2]} />
-      <mesh name={'CSG'} castShadow receiveShadow>
+      <mesh name={'CSG'} castShadow>
         <Subtraction useGroups>
           <Subtraction a useGroups>
-            <Brush a geometry={vlay.var.elevate.geometry} material={vlay.var.m_cubemap} />
-            <Brush b geometry={vlay.var.csg.geometry} material={vlay.var.csg.material} />
+            <Brush a geometry={vlay.var.elevate.geometry} material={vlay.var.m_vertex} />
+            <Brush b geometry={vlay.var.neg.geometry} material={vlay.var.m_cavity} />
           </Subtraction>
           <Brush b position={[0, 0, 0]}>
-            <icosahedronGeometry args={[v.R * 0.75, 1]} />
-            <meshStandardMaterial color="red" />
+            <icosahedronGeometry args={[v.R / 2, 1]} />
           </Brush>
         </Subtraction>
       </mesh>
@@ -631,7 +659,7 @@ const GUI = () => {
       step: 1,
       onChange: (v) => {
         vlay.set.proc = v
-        let onion = ['cubemap', 'elevate', 'csg']
+        let onion = ['cubemap', 'neg', 'pos', 'elevate']
         vlay.var.group.children.forEach(function (group) {
           let planet = group.children
           for (let i = 0; i < planet.length; i++) {
