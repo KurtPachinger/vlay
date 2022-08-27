@@ -610,12 +610,14 @@ window.vlay = vlay
 //
 
 export default function App(props) {
+  vlay.set = GUI()
+
   const [scene] = useState(() => vlay.ini())
 
   useLayoutEffect(() => {
     return () => void scene.dispose()
   }, [scene])
-  vlay.set = GUI()
+
   let v = vlay.var
   return (
     <Canvas shadows frameloop="demand" camera={{ position: [0, v.R * 4, v.R * 4] }}>
