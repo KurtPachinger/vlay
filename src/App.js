@@ -10,13 +10,15 @@ import { Brush, Subtraction, Addition } from '@react-three/csg'
 
 let vlay = {
   R: 10,
+  raycast: new THREE.Raycaster(),
+  pointer: new THREE.Vector3(),
   set: { seed: 0.5, proc: 1, show: 0 },
   var: {
     seed: {},
     box: new THREE.BoxGeometry(1, 1, 1, 2, 2, 2)
   },
   csg: {
-    geo: new THREE.BufferGeometry(),
+    geo: false,
     neg: new THREE.BufferGeometry(),
     pos: new THREE.BufferGeometry()
   },
@@ -66,9 +68,6 @@ let vlay = {
     }
     v.box.name = 'boxmap'
 
-    vlay.csg.geo = new THREE.IcosahedronGeometry(vlay.R, 6)
-    vlay.csg.geo.name = 'elevate'
-
     // RAY-TEST LAYERS
 
     v.out = new THREE.Group()
@@ -76,7 +75,7 @@ let vlay = {
     v.scene.add(v.out)
 
     // PROC-GEN
-    vlay.proc({ id: 'r3f' })
+    vlay.proc()
     controls()
 
     return v.scene
@@ -109,52 +108,25 @@ let vlay = {
 
         // MANTLE
         opts.group.userData.mantle = {}
+
+        opts.geo = new THREE.IcosahedronGeometry(vlay.R, 6)
+
+        //opts.geo = new THREE.IcosahedronGeometry(vlay.R, 6)
+
         //*
         // todo: use local geo but apply changes back (pos, col)
         //*
-
-        // ELEVATE, max subdivide
-        //opts.max = vlay.csg.geo.attributes.position.count * 8
       }
 
       if (opts.p > 0) {
-        // MESH SUBDIVIDE
-        //opts.elevate.computeBoundingSphere()
-        //let BS = opts.elevate.boundingSphere.radius
-        //const subdivide = new TessellateModifier(BS / 3, 2)
-        //opts.elevate = subdivide.modify(opts.elevate)
-
-        // displace
-        vlay.rays(opts)
-
-        if (opts.p > 1) {
-          // MESH SIMPLIFY
-          // overwrites geometry uv/color attributes
-          //const simplify = new SimplifyModifier()
-          //let count = opts.elevate.attributes.position.count
-          //if (count > opts.max) {
-          //  count = count - opts.max
-          //  opts.elevate = simplify.modify(opts.elevate, count * 0.975)
-          //}
-        }
-
-        // recursion
+        opts.geo = vlay.rays(opts)
+        //recurse
         opts.p--
         vlay.proc(opts)
       } else {
-        console.log('PROC DONE')
-        // ELEVATE
-        //let elevate = new THREE.Mesh(opts.elevate, v.m.vertex)
-        //elevate.name = 'elevate'
-        //elevate.castShadow = true
-        //elevate.receiveShadow = true
-        //opts.group.add(elevate)
-        //for CSG
-        //v.elevate = elevate
-
-        // MANTLE DEFECTS
+        vlay.csg.geo = opts.geo
+        console.log('proc done...')
         vlay.defects(opts.group)
-
         resolve('done!')
       }
     })
@@ -163,6 +135,8 @@ let vlay = {
   },
   rays: function (opts) {
     let blurs = []
+
+    console.log('geo', vlay.csg)
     //console.log('rays', opts)
 
     // cubemap PYR attenuate/convolute
@@ -179,26 +153,27 @@ let vlay = {
     }
 
     // raycast
-    let geo = vlay.csg.geo
+    let geo = opts.geo
     geo.computeBoundingSphere()
-    let ctr = geo.boundingSphere.center
+
+    let ctr = new THREE.Vector3(0, 0, 0)
     let dir = new THREE.Vector3()
     // elevation, color
     let pos = geo.getAttribute('position')
+    console.log('POS', pos)
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
     let col = geo.getAttribute('color')
     // mantle (cavities)
     let mantle = opts.group.userData.mantle
     // raycast at cubemap through vertices
-    let raycast = new THREE.Raycaster()
-    let pointer = new THREE.Vector3()
-    for (let i = 0; i < pos.count; i++) {
-      pointer.fromBufferAttribute(pos, i)
-      const jitter = 1.001
-      pointer.multiply(new THREE.Vector3(jitter, jitter, jitter))
-      raycast.set(ctr, dir.subVectors(pointer, ctr).normalize())
 
-      const intersects = raycast.intersectObjects(opts.group.children, false)
+    for (let i = 0; i < pos.count; i++) {
+      vlay.pointer.fromBufferAttribute(pos, i)
+      const jitter = 1.001
+      vlay.pointer.multiply(new THREE.Vector3(jitter, jitter, jitter))
+      vlay.raycast.set(ctr, dir.subVectors(vlay.pointer, ctr).normalize())
+
+      const intersects = vlay.raycast.intersectObjects(opts.group.children, false)
       if (intersects.length) {
         // cubemap sample (rgba, distance)
         let intersect = intersects[0]
@@ -219,13 +194,13 @@ let vlay = {
         d /= opts.p
         // displace elevation
         let disp = new THREE.Vector3()
-        disp.copy(pointer.multiplyScalar(1 - d * (1 / opts.p)))
+        disp.copy(vlay.pointer.multiplyScalar(1 - d * (1 / opts.p)))
         disp.lerp(relax, 0.25)
         pos.setXYZ(i, disp.x, disp.y, disp.z)
         // mantle (crust, core)
         // BVH-CSG cavities, extreme peak/valley
         let face = String(intersect.faceIndex).padStart(3, '0')
-        let dist = pointer.distanceTo(intersect.point).toFixed(3)
+        let dist = vlay.pointer.distanceTo(intersect.point).toFixed(3)
         let xyz = disp.x.toFixed(3) + ',' + disp.y.toFixed(3) + ',' + disp.z.toFixed(3)
         let defect = [dist, opts.p, xyz, face].join('|')
 
@@ -240,9 +215,12 @@ let vlay = {
         }
       }
     }
+    opts.geo.computeVertexNormals()
+    opts.geo.attributes.position.needsUpdate = true
 
     // cleanup
     vlay.clear(blurs)
+    return geo
   },
   defects: function (group) {
     // face defects to mesh and CSG
@@ -630,7 +608,8 @@ export default function App(props) {
 
   const R = vlay.R
   return (
-    <Canvas shadows frameloop="demand" camera={{ position: [0, R * 4, R * 4] }}>
+    //frameloop="demand"
+    <Canvas shadows camera={{ position: [0, R * 4, R * 4] }}>
       <OrbitControls makeDefault />
       <pointLight intensity={6} position={[0, R * 4, R * 8]} castShadow />
       <pointLight intensity={4} decay={R * 16} position={[0, R / 2, 0]} castShadow />
@@ -670,7 +649,7 @@ const controls = () => {
       vlay.proc({ s: n })
     })
   gui
-    .add(vlay.set, 'proc', 1, 10)
+    .add(vlay.set, 'proc', 1, 4)
     .step(1)
     .onChange(function (n) {
       vlay.proc({ p: n })
