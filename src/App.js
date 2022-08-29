@@ -1,86 +1,118 @@
 import './styles.scss'
 import * as THREE from 'three'
 import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { useRef, useState, useLayoutEffect } from 'react'
+import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js'
+import { useState, useLayoutEffect } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Reflector } from '@react-three/drei'
-import { useControls } from 'leva'
 import { Brush, Subtraction, Addition } from '@react-three/csg'
 //
 
 let v
 let vlay = {
+  R: 10,
+  set: { seed: 0.5, proc: 1, show: 0 },
   var: {
-    R: 10,
     seed: {},
-    ref: [
-      ['px', 'posx', 'right', '.50,.33'],
-      ['nx', 'negx', 'left', '0,.33'],
-      ['py', 'posy', 'top', '.25,0'],
-      ['ny', 'negy', 'bottom', '.25,.66'],
-      ['pz', 'posz', 'front', '.25,.33'],
-      ['nz', 'negz', 'back', '.75,.33']
-    ],
     raycast: new THREE.Raycaster(),
     pointer: new THREE.Vector3(),
-    group: new THREE.Group(),
-    m: {
-      vertex: new THREE.MeshStandardMaterial({
-        name: 'vertex',
-        color: 0xc08080,
-        vertexColors: true,
-        metalness: 0.33,
-        roughness: 0.66
-      }),
-      cavity: new THREE.MeshPhongMaterial({
-        name: 'cavity',
-        color: 0x8080c0,
-        vertexColors: true,
-        flatShading: true,
-        transparent: true,
-        opacity: 0.9,
-        side: THREE.FrontSide,
-        shadowSide: THREE.FrontSide
-      })
-    }
+    box: new THREE.BoxGeometry(1, 1, 1, 2, 2, 2)
   },
-  set: { seed: 0.5, proc: 1 },
+  csg: {
+    geo: new THREE.BufferGeometry(),
+    neg: new THREE.BufferGeometry(),
+    pos: new THREE.BufferGeometry()
+  },
+  mat: {
+    pos: new THREE.MeshStandardMaterial({
+      name: 'pos',
+      color: 0xc08080,
+      vertexColors: true,
+      metalness: 0.33,
+      roughness: 0.66
+    }),
+    neg: new THREE.MeshPhongMaterial({
+      name: 'neg',
+      color: 0x8080c0,
+      vertexColors: true,
+      flatShading: true,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.FrontSide,
+      shadowSide: THREE.FrontSide
+    })
+  },
+  ref: [
+    ['px', 'posx', 'right', '.50,.33'],
+    ['nx', 'negx', 'left', '0,.33'],
+    ['py', 'posy', 'top', '.25,0'],
+    ['ny', 'negy', 'bottom', '.25,.66'],
+    ['pz', 'posz', 'front', '.25,.33'],
+    ['nz', 'negz', 'back', '.75,.33']
+  ],
+  ini: function () {
+    console.log('ini')
+    v = vlay.var
+    const R = vlay.R * 2
 
-  proc: async function (opts = { p: vlay.set.proc, id: 'noise', seed: vlay.set.seed }) {
+    // INIT SCENE, FIRST-RUN
+
+    // MAP BOX-SPHERE FOR TARGET
+    let pos = v.box.getAttribute('position')
+    let vtx = new THREE.Vector3()
+    for (var i = 0; i < pos.count; i++) {
+      vtx.fromBufferAttribute(pos, i)
+      let mult = R / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
+      vtx.multiplyScalar(mult)
+      pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
+    }
+    v.box.name = 'boxmap'
+
+    vlay.csg.geo = new THREE.IcosahedronGeometry(vlay.R, 6)
+    vlay.csg.geo.name = 'elevate'
+
+    // RAY-TEST LAYERS
+
+    v.out = new THREE.Group()
+    v.out.name = 'output'
+    v.scene.add(v.out)
+
+    // PROC-GEN
+    vlay.proc({ id: 'r3f' })
+    controls()
+  },
+  proc: async function (opts = {}) {
     let promise = new Promise((resolve, reject) => {
-      console.log('proc', opts.p)
-      const v = vlay.var
+      console.log('proc', opts)
 
-      if (!opts.r) {
+      if (!opts.init) {
+        // INIT
+        opts.init = true
+        opts.p = opts.p || vlay.set.proc
+        opts.s = opts.s || vlay.set.seed
+        opts.id = [opts.id || 'noise', opts.s, opts.p].join('_')
+
         // RESET
-        opts.r = true
         vlay.clear(opts.id, true)
-        // id and cubemap
-        // if not, hide cubemap
-        v.group.children.forEach(function (group) {
-          if (group.name !== opts.id) {
-            group.visible = false
-          }
-        })
-
         // GROUP
         opts.group = new THREE.Group()
         opts.group.name = opts.id
+        v.out.add(opts.group)
         // MANTLE
         opts.group.userData.mantle = {}
-        v.group.add(opts.group)
 
         // CUBEMAP
-        let map = vlay.set.cubemap && opts.cubemap ? opts.cubemap : 0
-        opts.cubemap = vlay.cubemap(map, opts)
-        let cubemap = new THREE.Mesh(v.boxsphere, opts.cubemap)
-        cubemap.name = 'cubemap'
-        opts.group.add(cubemap)
-        v.m.cubemap = opts.cubemap
+        //
+
+        vlay.mat.box = vlay.cubemap(opts.box || 0, opts)
+        let box = new THREE.Mesh(v.box, vlay.mat.box)
+        box.name = 'box'
+        box.renderOrder = 2
+        opts.group.add(box)
+        //
 
         // ELEVATE, max subdivide
-        opts.elevate = vlay.var.elevate = new THREE.IcosahedronGeometry(v.R, 6)
-        opts.max = opts.elevate.attributes.position.count * 8
+        //opts.max = vlay.csg.geo.attributes.position.count * 8
       }
 
       if (opts.p > 0) {
@@ -110,8 +142,8 @@ let vlay = {
       } else {
         console.log('PROC DONE')
         // ELEVATE
-        let elevate = new THREE.Mesh(opts.elevate, v.m.vertex)
-        elevate.name = 'elevate'
+        //let elevate = new THREE.Mesh(opts.elevate, v.m.vertex)
+        //elevate.name = 'elevate'
         //elevate.castShadow = true
         //elevate.receiveShadow = true
         //opts.group.add(elevate)
@@ -129,11 +161,10 @@ let vlay = {
   },
   rays: function (opts) {
     let blurs = []
-    const v = vlay.var
     //console.log('rays', opts)
 
     // cubemap PYR attenuate/convolute
-    let target = opts.group.getObjectByName('cubemap').material
+    let target = opts.group.getObjectByName('box').material
 
     let k = vlay.set.proc - opts.p + 1
     for (let i = 0; i < target.length; i++) {
@@ -146,7 +177,7 @@ let vlay = {
     }
 
     // raycast
-    let geo = opts.elevate
+    let geo = vlay.csg.geo
     geo.computeBoundingSphere()
     let ctr = geo.boundingSphere.center
     let dir = new THREE.Vector3()
@@ -198,9 +229,9 @@ let vlay = {
         if (mantle[face] === undefined) {
           mantle[face] = []
         }
-        if (dist < v.R * 0.2) {
+        if (dist < vlay.R * 0.2) {
           mantle[face].push(defect + '|pos')
-        } else if (dist < v.R * 0.4) {
+        } else if (dist < vlay.R * 0.4) {
           mantle[face].push(defect + '|neg')
         }
       }
@@ -210,7 +241,6 @@ let vlay = {
     vlay.clear(blurs)
   },
   defects: function (group) {
-    const v = vlay.var
     // face defects to mesh and CSG
 
     const userData = group.userData
@@ -276,7 +306,7 @@ let vlay = {
         // xyz for curve mesh
         coord.push(point)
         // dist for vertex color
-        depth.push({ d: defect[0] / v.R, t: defect[defect.length - 1] })
+        depth.push({ d: defect[0] / vlay.R, t: defect[defect.length - 1] })
       }
 
       cluster = cluster / defects.length
@@ -288,15 +318,13 @@ let vlay = {
 
     // cavities buffer geometry to mesh
     //fitline = mergeVertices(fitline, 0.5)
-    //let fitline = new THREE.PlaneGeometry(v.R * 2, v.R * 2)
-    let fitline = new THREE.BufferGeometry()
+    let fitline = new THREE.PlaneGeometry(1, 1)
 
-    let neg = new THREE.Mesh(fit.neg || fitline, v.m.cavity)
-    neg.name = 'neg'
-    let pos = new THREE.Mesh(fit.pos || fitline, v.m.vertex)
-    pos.name = 'pos'
-    pos.castShadow = true
-    pos.receiveShadow = true
+    let neg = new THREE.Mesh(fit.neg || fitline, vlay.mat.neg)
+    neg.name = neg.geometry.name = 'neg'
+    let pos = new THREE.Mesh(fit.pos || fitline, vlay.mat.pos)
+    pos.name = pos.geometry.name = 'pos'
+    pos.castShadow = pos.receiveShadow = true
 
     // CSG tube/s
     function topo(coord, feat, depth) {
@@ -358,7 +386,7 @@ let vlay = {
         // vertex distance
         v.pointer.fromBufferAttribute(pos, i)
         let d = v.pointer.distanceTo(new THREE.Vector3(0, 0, 0))
-        d = v.R / d
+        d = vlay.R / d
         // curve data
         let pt = depth[Math.floor((i / pos.count) * depth.length)]
         let s = pt.t === 'core' ? 0.125 : 0.5
@@ -370,7 +398,7 @@ let vlay = {
     console.log('fit', fit)
     // OUTPUT
     group.add(pos, neg)
-    v.neg = neg.geometry
+    vlay.csg.neg = neg.geometry
   },
   cubemap: function (num, opts) {
     function noise(canvas) {
@@ -384,7 +412,7 @@ let vlay = {
 
       for (; i < len; i++) {
         // argb (elevation)
-        buffer32[i] = Number('0x' + vlay.seed(opts.seed, opts.id))
+        buffer32[i] = Number('0x' + vlay.seed(opts.id))
         //buffer32[i] += 0x80000000;
       }
 
@@ -407,7 +435,7 @@ let vlay = {
       let terrain
       if (!num) {
         // random noise (...game of life?)
-        canvas.id = canvas.title = 'rnd_' + vlay.var.ref[i][0] + '_' + ts
+        canvas.id = canvas.title = 'rnd_' + vlay.ref[i][0] + '_' + ts
         canvas.width = canvas.height = 8
         terrain = noise(canvas)
         fragment.appendChild(canvas)
@@ -418,12 +446,13 @@ let vlay = {
       terrain.magFilter = THREE.NearestFilter
 
       let mat = new THREE.MeshBasicMaterial({
+        //color: 0x00ffff,
+        name: 'boxmap',
         side: THREE.DoubleSide, //ray intersects
         map: terrain,
         transparent: true,
         opacity: 0.5,
-        //blending: THREE.MultiplyBlending,
-        depthWrite: false
+        depthTest: false
       })
 
       cubemap.push(mat)
@@ -469,39 +498,41 @@ let vlay = {
 
     return canvas
   },
-  seed: function (seed, gen, uei = 1) {
+  seed: function (gen, uei = 1) {
     // pseudo-random number (from last or root)
-    let S = vlay.var.seed[gen]
-    S = S ? S ** 1.5 : ((Math.PI - 3) * 1e5) / seed
+    let S = v.seed[gen]
+    S = S ? S ** 1.5 : ((Math.PI - 3) * 1e5) / vlay.set.seed
     S = Number((S * uei).toFixed().slice(-8))
     //recursive
-    vlay.var.seed[gen] = S
+    v.seed[gen] = S
     return S
   },
   clear: function (id, proc) {
+    let v = vlay.var
     if (proc) {
       // three cleanup
-      vlay.var.seed[id] = null
-      let group = vlay.var.group
+      v.seed[id] = null
+      let group = v.out.getObjectByName(id)
       for (let i = 0; group && i < group.children.length; i++) {
         let child = group.children[i]
-        if (child.name === 'cubemap') {
+        if (child.name === 'box') {
           child.material.forEach(function (cubeface) {
             cubeface.map.dispose()
           })
         }
         group.remove(child)
       }
-      vlay.var.group.remove(group)
+      v.out.remove(group)
     } else if (Array.isArray(id)) {
       for (var i in id) {
         id[i] = null
       }
     } else {
       // DOM cleanup
-      id = document.getElementById(id)
-      while (id.lastChild) {
-        let el = id.removeChild(id.lastChild)
+      let els = document.getElementById(id).children
+      for (let i = els.length - 1; i >= 0; i--) {
+        let el = els[i]
+        el = el.parentElement.removeChild(el)
         el = null
       }
     }
@@ -513,9 +544,9 @@ let vlay = {
       return
     }
 
-    let flat = vlay.var.ref.flat()
-    vlay.clear('cubemap')
-    vlay.var.cm = []
+    let flat = vlay.ref.flat()
+    vlay.clear('boxmap')
+    v.cm = []
 
     let fragment = new DocumentFragment()
     for (let i = 0; i < files.length; i++) {
@@ -531,12 +562,12 @@ let vlay = {
         let crop = files.length === 1 ? 6 : 1
         for (let i = 0; i < crop; i++) {
           // coords percent
-          let face = v.ref[i]
+          let face = vlay.ref[i]
           let xy = face[face.length - 1].split(',')
           xy = crop > 1 ? { x: xy[0], y: xy[1] } : null
           // image resize and crop
           let canvas = vlay.fileMax(img, xy)
-          let name = 'img_' + v.ref[i][0]
+          let name = 'img_' + vlay.ref[i][0]
           canvas.title = canvas.id = name
           fragment.appendChild(canvas)
 
@@ -564,9 +595,9 @@ let vlay = {
 
         // await cubemap, sort, and proceed
         if (v.cm.length >= files.length) {
-          document.getElementById('cubemap').appendChild(fragment)
+          document.getElementById('boxmap').appendChild(fragment)
           v.cm.sort()
-          vlay.proc({ p: vlay.set.proc, seed: vlay.set.seed, id: 'image', cubemap: v.cm })
+          vlay.proc({ box: v.cm, id: 'box' })
         }
 
         img = null
@@ -585,116 +616,72 @@ window.vlay = vlay
 //
 
 export default function App(props) {
-  const v = vlay.var
-  v.group.name = 'voxels'
+  vlay.var.scene = new THREE.Scene()
+  const [scene] = useState(() => vlay.var.scene)
+  vlay.ini()
 
-  GUI(vlay.set, v, v.group)
+  useLayoutEffect(() => {
+    return () => void scene.dispose()
+  }, [scene])
 
+  const R = vlay.R
   return (
-    <Canvas shadows frameloop="demand" camera={{ position: [0, v.R * 4, v.R * 4] }}>
-      <Scened>
-        <pointLight intensity={6} position={[0, v.R * 8, v.R * 8]} castShadow />
-        <pointLight intensity={4} decay={v.R * 16} position={[0, v.R / 2, 0]} castShadow />
-        <axesHelper args={[v.R * 2]} />
-        <gridHelper args={[v.R * 8, 4]} position={[0, -0.001, 0]} />
-        <primitive object={v.group} {...props} />
-        <mesh name={'CSG'} castShadow>
-          <Subtraction useGroups>
-            <Subtraction a useGroups>
-              <Brush a geometry={v.elevate} material={v.m.vertex} />
-              <Brush b geometry={v.neg} material={v.m.cavity} />
-            </Subtraction>
-            <Brush b position={[0, 0, 0]}>
-              <icosahedronGeometry args={[v.R / 2, 1]} />
-            </Brush>
+    <Canvas shadows frameloop="demand" camera={{ position: [0, R * 4, R * 4] }}>
+      <OrbitControls makeDefault />
+      <pointLight intensity={6} position={[0, R * 8, R * 8]} castShadow />
+      <pointLight intensity={4} decay={R * 16} position={[0, R / 2, 0]} castShadow />
+      <gridHelper args={[R * 8, 8]} position={[0, -0.1, 0]} />
+      <Ground receiveShadow mirror={1} blur={[256, 256]} mixBlur={4} mixStrength={0.25} rotation={[-Math.PI / 2, 0, Math.PI / 2]} />
+      <mesh name={'CSG'} castShadow>
+        <Subtraction useGroups>
+          <Subtraction a useGroups>
+            <Brush a geometry={vlay.csg.geo} material={vlay.mat.pos} />
+            <Brush b geometry={vlay.csg.neg} material={vlay.mat.neg} />
           </Subtraction>
-        </mesh>
-        <Ground />
-        <OrbitControls makeDefault />
-      </Scened>
+          <Brush b position={[0, 0, 0]}>
+            <icosahedronGeometry args={[R / 2, 1]} />
+          </Brush>
+        </Subtraction>
+      </mesh>
+      <primitive object={scene} {...props} />
     </Canvas>
   )
 }
 
-function Ground(v, ...props) {
+function Ground(props) {
   return (
-    <Reflector resolution={256} args={[v.R * 8, v.R * 8]} {...props}>
+    <Reflector resolution={256} args={[vlay.R * 8, vlay.R * 8]} {...props}>
       {(Material, props) => <Material color="#f0f0f0" transparent opacity={0.66} {...props} />}
     </Reflector>
   )
 }
 
-function GUI(set, v, group) {
-  //const ref = useRef()
-  //const [hovered, setHover] = useState(false)
-  //useFrame((state) => {
-
-  return useControls({
-    seed: {
-      value: 0.5,
-      min: 0,
-      max: 1,
-      onChange: (n) => {
-        set.seed = n
-        vlay.proc()
-      }
-      //transient: false
-    },
-    proc: {
-      value: 1,
-      min: 1,
-      max: 10,
-      step: 1,
-      onChange: (n) => {
-        set.proc = n
-        vlay.proc()
-      }
-      //transient: false
-    },
-    show: {
-      value: 0,
-      min: 0,
-      max: 2,
-      step: 1,
-      onChange: (n) => {
-        let onion = ['cubemap', 'neg', 'pos']
-        group.children.forEach(function (group) {
-          let planet = group.children || []
-          for (let i = 0; i < planet.length; i++) {
-            let mesh = planet[i]
-            let show = onion.indexOf(mesh.name) >= n
-            mesh.visible = show ? true : false
-          }
-        })
-      }
-      //transient: false
-    }
-  })
-}
-
-function Scened(props) {
-  console.log('ini')
-
-  // INIT SCENE, FIRST-RUN
-  let scene = new THREE.Scene()
-
-  // MAP BOX-SPHERE FOR TARGET
-  const R = vlay.var.R * 2
-  vlay.var.boxsphere = new THREE.BoxGeometry(R, R, R, 2, 2, 2)
-  let pos = vlay.var.boxsphere.getAttribute('position')
-  let vtx = new THREE.Vector3()
-  for (var i = 0; i < pos.count; i++) {
-    vtx.fromBufferAttribute(pos, i)
-    let mult = R / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
-    vtx.multiplyScalar(mult)
-    pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
-  }
-
-  // PROC-GEN
-  vlay.proc()
-
-  const sRef = useRef(scene)
-  vlay.var.scene = sRef
-
-  return <scene ref={sRef} {...props} />
+const controls = () => {
+  const gui = new GUI()
+  gui
+    .add(vlay.set, 'seed', 0, 1)
+    .step(0.01)
+    .onChange(function (n) {
+      vlay.proc({ s: n })
+    })
+  gui
+    .add(vlay.set, 'proc', 1, 10)
+    .step(1)
+    .onChange(function (n) {
+      vlay.proc({ p: n })
+    })
+  gui
+    .add(vlay.set, 'show', 0, 3)
+    .step(1)
+    .onChange(function (n) {
+      let onion = ['box', 'neg', 'pos', 'elevate']
+      vlay.var.group.children.forEach(function (group) {
+        let planet = group.children
+        for (let i = 0; i < planet.length; i++) {
+          let mesh = planet[i]
+          let show = onion.indexOf(mesh.name) >= n
+          mesh.visible = show
+        }
+      })
+    })
 }
