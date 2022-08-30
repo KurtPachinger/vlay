@@ -268,12 +268,11 @@ let vlay = {
       // === 'core' ? 'pos' : 'neg'
       let coord = []
       let depth = []
+      let f
       for (let i = 0; i < defects.length; i++) {
         // 'dist|p|x,y,z|type'
         let defect = defects[i].split('|')
-
         let feat = defect[defect.length - 1]
-
         if (feat === 'neg') {
           cluster++
         }
@@ -282,13 +281,21 @@ let vlay = {
         point = point.split(',')
         point = new THREE.Vector3(+point[0], +point[1], +point[2])
 
+        // dist for vertex color
+        let dNorm = defect[0] / vlay.R
+        depth.push({ d: dNorm, t: defect[defect.length - 1] })
+
+        if (i === 0) {
+          f = ft(feat, dNorm)
+        }
+
         // path from center to outside
-        point.multiplyScalar(i / (defects.length - 1) + 0.33)
+        if (feat === 'neg' && !f.neg) {
+          point.multiplyScalar(i / (defects.length - 1) + 0.33)
+        }
 
         // xyz for curve mesh
         coord.push(point)
-        // dist for vertex color
-        depth.push({ d: defect[0] / vlay.R, t: defect[defect.length - 1] })
       }
 
       cluster = cluster / defects.length
@@ -308,12 +315,25 @@ let vlay = {
     pos.name = pos.geometry.name = 'pos'
     pos.castShadow = pos.receiveShadow = true
 
+    function ft(feat, toBox, num) {
+      // re-classify features
+      let f = { neg: false, pos: false }
+      if (feat === 'neg') {
+        f.neg = toBox <= 0.25
+      } else {
+        f.pos = toBox >= 0.5
+      }
+
+      return f
+    }
+
     // CSG tube/s
     function topo(coord, feat, depth) {
-      let loop = feat === 'pos' ? coord.length : 1
+      let f = ft(feat, depth[0].d)
+      let loop = feat === 'pos' && !f.pos ? coord.length : 1
       let geo
 
-      if (feat === 'neg') {
+      if (feat === 'neg' || f.pos) {
         const curve = new THREE.CatmullRomCurve3(coord)
         const extrude = {
           steps: 8,
@@ -336,7 +356,7 @@ let vlay = {
       // OUTPUT
 
       for (let i = 0; i < loop; i++) {
-        if (feat === 'pos') {
+        if (feat === 'pos' && !f.pos) {
           let pt = coord[i]
           let d = 1 + depth[i].d * 2
           geo = new THREE.BoxGeometry(d, d, d)
