@@ -2,8 +2,8 @@ import './styles.scss'
 import * as THREE from 'three'
 import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js'
-import { useState, useRef, useLayoutEffect } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { useRef } from 'react'
+import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Reflector } from '@react-three/drei'
 import { Brush, Subtraction, Addition } from '@react-three/csg'
 //
@@ -649,26 +649,20 @@ function CSG(...props) {
   vlay.csg.geo = brushA
   vlay.csg.neg = brushB
 
-  useFrame((bool, state) => {
-    if (bool.current && state.requireUpdate) {
-      console.log(state)
-      bool.current.needsUpdate = true
-    }
-  })
+  //useFrame((bool, state) => {
+  //  if (bool.current && state.requireUpdate) {
+  //    console.log(state)
+  //   bool.current.needsUpdate = true
+  //  }
+  //})
 
   return (
     //onUpdate={(self) => (self.verticesNeedUpdate = true)}
     <mesh ref={bool} name={'CSG'} castShadow {...props}>
       <Subtraction useGroups>
         <Subtraction a useGroups>
-          <Brush a ref={brushA} {...props}>
-            <bufferGeometry ref={brushA} onUpdate={(self) => (self.needsUpdate = true)} />
-            <material ref={vlay.mat.pos} />
-          </Brush>
-          <Brush b ref={brushB} {...props}>
-            <bufferGeometry ref={brushB} onChange={(self) => (self.needsUpdate = true)} />
-            <material ref={vlay.mat.neg} />
-          </Brush>
+          <Brush a ref={brushA} material={vlay.mat.pos} onUpdate={(self) => (self.needsUpdate = true)} {...props} />
+          <Brush b ref={brushB} material={vlay.mat.neg} onChange={(self) => (self.needsUpdate = true)} {...props} />
         </Subtraction>
         <Brush b position={[0, 0, 0]}>
           <icosahedronGeometry args={[vlay.R / 2, 1]} />
