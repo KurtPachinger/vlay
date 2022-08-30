@@ -2,8 +2,8 @@ import './styles.scss'
 import * as THREE from 'three'
 import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js'
-import { useState, useLayoutEffect } from 'react'
-import { Canvas } from '@react-three/fiber'
+import { useState, useRef, useLayoutEffect } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Reflector } from '@react-three/drei'
 import { Brush, Subtraction, Addition } from '@react-three/csg'
 //
@@ -12,10 +12,9 @@ let vlay = {
   R: 10,
   raycast: new THREE.Raycaster(),
   pointer: new THREE.Vector3(),
-  set: { seed: 0.5, proc: 1, show: 0 },
+  opt: { seed: 0.5, proc: 1, show: 0 },
   var: {
-    seed: {},
-    box: new THREE.BoxGeometry(1, 1, 1, 2, 2, 2)
+    uid: {}
   },
   csg: {
     geo: false,
@@ -23,12 +22,15 @@ let vlay = {
     pos: new THREE.BufferGeometry()
   },
   mat: {
-    pos: new THREE.MeshStandardMaterial({
-      name: 'pos',
-      color: 0xc08080,
-      vertexColors: true,
-      metalness: 0.33,
-      roughness: 0.66
+    box: new THREE.BoxGeometry(1, 1, 1, 2, 2, 2),
+    img: new THREE.MeshBasicMaterial({
+      //color: 0x00ffff,
+      name: 'img',
+      side: THREE.DoubleSide, //ray intersects
+      //map: terrain,
+      transparent: true,
+      opacity: 0.5,
+      depthTest: false
     }),
     neg: new THREE.MeshPhongMaterial({
       name: 'neg',
@@ -39,26 +41,168 @@ let vlay = {
       opacity: 0.9,
       side: THREE.FrontSide,
       shadowSide: THREE.FrontSide
-    })
+    }),
+    pos: new THREE.MeshStandardMaterial({
+      name: 'pos',
+      color: 0xc08080,
+      vertexColors: true,
+      metalness: 0.33,
+      roughness: 0.66
+    }),
+    xyz: [
+      ['px', 'posx', 'right', '.50,.33'],
+      ['nx', 'negx', 'left', '0,.33'],
+      ['py', 'posy', 'top', '.25,0'],
+      ['ny', 'negy', 'bottom', '.25,.66'],
+      ['pz', 'posz', 'front', '.25,.33'],
+      ['nz', 'negz', 'back', '.75,.33']
+    ]
   },
-  ref: [
-    ['px', 'posx', 'right', '.50,.33'],
-    ['nx', 'negx', 'left', '0,.33'],
-    ['py', 'posy', 'top', '.25,0'],
-    ['ny', 'negy', 'bottom', '.25,.66'],
-    ['pz', 'posz', 'front', '.25,.33'],
-    ['nz', 'negz', 'back', '.75,.33']
-  ],
-  ini: function () {
-    console.log('ini')
-    const v = vlay.var
+  util: {
+    clear: function (sel = []) {
+      if (sel.type === 'Group') {
+        // three
+        vlay.var.uid[sel.name] = null
+        let els = sel.children
+        for (let i in els) {
+          let el = els[i]
+          if (el.name === 'box') {
+            el.material.forEach(function (cubeface) {
+              cubeface.map.dispose()
+            })
+          }
+          sel.remove(el)
+        }
+        vlay.var.out.remove(sel)
+      } else if (Array.isArray(sel)) {
+        // texture array
+        for (let i in sel) {
+          sel[i] = null
+        }
+      } else {
+        // DOM image
+        sel = document.getElementById(sel)
+        let els = sel ? sel.children : []
+        for (let i = els.length - 1; i >= 0; i--) {
+          let el = els[i]
+          el = sel.removeChild(el)
+          el = null
+        }
+      }
+    },
+    click: function (e) {
+      let files = e.target.files
+
+      //console.log(files);
+      if (files.length !== 1 && files.length !== 6) {
+        return
+      }
+
+      let flat = vlay.mat.xyz.flat()
+      vlay.util.clear('boxmap')
+      const cm = []
+
+      let fragment = new DocumentFragment()
+      for (let i = 0; i < files.length; i++) {
+        let file = files[i]
+
+        // load image
+        let tex = URL.createObjectURL(file)
+        let img = new Image()
+        img.onload = function () {
+          URL.revokeObjectURL(this.src)
+
+          // extract cube faces if single image
+          let crop = files.length === 1 ? 6 : 1
+          for (let i = 0; i < crop; i++) {
+            // coords percent
+            let face = vlay.mat.xyz[i]
+            let xy = face[face.length - 1].split(',')
+            xy = crop > 1 ? { x: xy[0], y: xy[1] } : null
+            // image resize and crop
+            let canvas = vlay.util.refit(img, xy)
+            let name = 'img_' + vlay.mat.xyz[i][0]
+            canvas.title = canvas.id = name
+            fragment.appendChild(canvas)
+
+            // cubemap face from coords
+            if (crop === 6) {
+              cm.push([i + '_' + name, canvas])
+              continue
+            }
+
+            // cubemap face from filename
+            name = file.name.toString().toLowerCase()
+            for (let j = 0; j < flat.length; j++) {
+              let match = name.search(flat[j])
+              console.log(match)
+              //console.log("match", j, name, match);
+              if (match > -1) {
+                name = Math.floor(j / 3) + '_' + name
+                cm.push([name, canvas])
+                break
+              } else if (j === flat.length) {
+                cm.push([name, canvas])
+              }
+            }
+          }
+
+          // await cubemap, sort, and proceed
+          if (cm.length >= files.length) {
+            document.getElementById('boxmap').appendChild(fragment)
+            cm.sort()
+            vlay.proc({ box: cm, id: 'box' })
+          }
+
+          img = null
+        }
+        img.src = tex
+      }
+    },
+    refit: function (img, crop) {
+      let MAX_ = vlay.opt.proc * 128
+      let width = img.width
+      let height = img.height
+
+      // square
+      if (crop) {
+        width = height = MAX_
+      }
+
+      // fit dimensions
+      if (width > height) {
+        if (width > MAX_) {
+          height = height * (MAX_ / width)
+          width = MAX_
+        }
+      } else {
+        if (height > MAX_) {
+          width = width * (MAX_ / height)
+          height = MAX_
+        }
+      }
+
+      let canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      let ctx = canvas.getContext('2d')
+      if (!crop) {
+        ctx.drawImage(img, 0, 0, width, height)
+      } else {
+        // assume aspect 1.33
+        let face = img.width / 4
+        ctx.drawImage(img, img.width * crop.x, img.height * crop.y, face, face, 0, 0, width, height)
+      }
+
+      return canvas
+    }
+  },
+  init: function () {
+    console.log('init')
     const R = vlay.R * 2
 
-    // INIT SCENE, FIRST-RUN
-    vlay.var.scene = new THREE.Scene()
-
     // MAP BOX-SPHERE FOR TARGET
-    let pos = v.box.getAttribute('position')
+    let pos = vlay.mat.box.getAttribute('position')
     let vtx = new THREE.Vector3()
     for (var i = 0; i < pos.count; i++) {
       vtx.fromBufferAttribute(pos, i)
@@ -66,19 +210,9 @@ let vlay = {
       vtx.multiplyScalar(mult)
       pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
     }
-    v.box.name = 'boxmap'
+    vlay.mat.box.name = 'boxmap'
 
     // RAY-TEST LAYERS
-
-    v.out = new THREE.Group()
-    v.out.name = 'output'
-    v.scene.add(v.out)
-
-    // PROC-GEN
-    vlay.proc()
-    controls()
-
-    return v.scene
   },
   proc: async function (opts = {}) {
     let promise = new Promise((resolve, reject) => {
@@ -87,21 +221,21 @@ let vlay = {
       if (!opts.init) {
         // INIT
         opts.init = true
-        opts.p = opts.p || vlay.set.proc
-        opts.s = opts.s || vlay.set.seed
+        opts.p = opts.p || vlay.opt.proc
+        opts.s = opts.s || vlay.opt.uid
         opts.id = 'CSG'
         //opts.id = [opts.id || 'noise', opts.s, opts.p].join('_')
 
         // RESET
-        vlay.clear(opts.id, true)
+        vlay.util.clear(vlay.var.out.getObjectByName(opts.id))
         // GROUP
         opts.group = new THREE.Group()
         opts.group.name = opts.id
         vlay.var.out.add(opts.group)
 
         // CUBEMAP
-        vlay.mat.box = vlay.cubemap(opts.box || 0, opts)
-        let box = new THREE.Mesh(vlay.var.box, vlay.mat.box)
+        vlay.mat.map = vlay.cubemap(opts.box || 0, opts)
+        let box = new THREE.Mesh(vlay.mat.box, vlay.mat.map)
         box.name = 'box'
         box.renderOrder = 2
         opts.group.add(box)
@@ -142,7 +276,7 @@ let vlay = {
     // cubemap PYR attenuate/convolute
     let target = opts.group.getObjectByName('box').material
 
-    let k = vlay.set.proc - opts.p + 1
+    let k = vlay.opt.proc - opts.p + 1
     for (let i = 0; i < target.length; i++) {
       let material = target[i].map.source.data
       let blur = document.createElement('canvas')
@@ -219,7 +353,7 @@ let vlay = {
     opts.geo.attributes.position.needsUpdate = true
 
     // cleanup
-    vlay.clear(blurs)
+    vlay.util.clear(blurs)
     return geo
   },
   defects: function (group) {
@@ -415,7 +549,7 @@ let vlay = {
 
       for (; i < len; i++) {
         // argb (elevation)
-        buffer32[i] = Number('0x' + vlay.seed(opts.id))
+        buffer32[i] = Number('0x' + vlay.gen(opts.id))
         //buffer32[i] += 0x80000000;
       }
 
@@ -426,7 +560,7 @@ let vlay = {
     }
 
     if (!num) {
-      vlay.clear('texels')
+      vlay.util.clear('genmap')
     }
 
     let cubemap = []
@@ -438,7 +572,7 @@ let vlay = {
       let terrain
       if (!num) {
         // random noise (...game of life?)
-        canvas.id = canvas.title = 'rnd_' + vlay.ref[i][0] + '_' + ts
+        canvas.id = canvas.title = 'rnd_' + vlay.mat.xyz[i][0] + '_' + ts
         canvas.width = canvas.height = 8
         terrain = noise(canvas)
         fragment.appendChild(canvas)
@@ -448,183 +582,64 @@ let vlay = {
       terrain.minFilter = THREE.NearestFilter
       terrain.magFilter = THREE.NearestFilter
 
-      let mat = new THREE.MeshBasicMaterial({
-        //color: 0x00ffff,
-        name: 'boxmap',
-        side: THREE.DoubleSide, //ray intersects
-        map: terrain,
-        transparent: true,
-        opacity: 0.5,
-        depthTest: false
-      })
+      let mat = vlay.mat.img.clone()
+      mat.name = !num ? 'genmap' : 'boxmap'
+      mat.map = terrain
 
       cubemap.push(mat)
     }
-    document.getElementById('texels').appendChild(fragment)
+    document.getElementById('genmap').appendChild(fragment)
 
     return cubemap
   },
-  fileMax: function (img, crop) {
-    let MAX_ = vlay.set.proc * 128
-    let width = img.width
-    let height = img.height
 
-    // square
-    if (crop) {
-      width = height = MAX_
-    }
-
-    // fit dimensions
-    if (width > height) {
-      if (width > MAX_) {
-        height = height * (MAX_ / width)
-        width = MAX_
-      }
-    } else {
-      if (height > MAX_) {
-        width = width * (MAX_ / height)
-        height = MAX_
-      }
-    }
-
-    let canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    let ctx = canvas.getContext('2d')
-    if (!crop) {
-      ctx.drawImage(img, 0, 0, width, height)
-    } else {
-      // assume aspect 1.33
-      let face = img.width / 4
-      ctx.drawImage(img, img.width * crop.x, img.height * crop.y, face, face, 0, 0, width, height)
-    }
-
-    return canvas
-  },
-  seed: function (gen, uei = 1) {
-    // pseudo-random number (from last or root)
-    let S = vlay.var.seed[gen]
-    S = S ? S ** 1.5 : ((Math.PI - 3) * 1e5) / vlay.set.seed
+  gen: function (id, uei = 1) {
+    // uid from seed (from last or root)
+    let S = vlay.var.uid[id]
+    S = S ? S ** 1.5 : ((Math.PI - 3) * 1e5) / vlay.opt.seed
     S = Number((S * uei).toFixed().slice(-8))
-    //recursive
-    vlay.var.seed[gen] = S
+    // output
+    vlay.var.uid[id] = S
     return S
-  },
-  clear: function (id, proc) {
-    let v = vlay.var
-    if (proc) {
-      // three cleanup
-      v.seed[id] = null
-      let group = v.out.getObjectByName(id)
-      for (let i = 0; group && i < group.children.length; i++) {
-        let child = group.children[i]
-        if (child.name === 'box') {
-          child.material.forEach(function (cubeface) {
-            cubeface.map.dispose()
-          })
-        }
-        group.remove(child)
-      }
-      v.out.remove(group)
-    } else if (Array.isArray(id)) {
-      for (var i in id) {
-        id[i] = null
-      }
-    } else {
-      // DOM cleanup
-      let els = document.getElementById(id).children
-      for (let i = els.length - 1; i >= 0; i--) {
-        let el = els[i]
-        el = el.parentElement.removeChild(el)
-        el = null
-      }
-    }
-  },
-  click: function (e) {
-    let files = e.target.files
-
-    //console.log(files);
-    if (files.length !== 1 && files.length !== 6) {
-      return
-    }
-
-    let flat = vlay.ref.flat()
-    vlay.clear('boxmap')
-    const cm = []
-
-    let fragment = new DocumentFragment()
-    for (let i = 0; i < files.length; i++) {
-      let file = files[i]
-
-      // load image
-      let tex = URL.createObjectURL(file)
-      let img = new Image()
-      img.onload = function () {
-        URL.revokeObjectURL(this.src)
-
-        // extract cube faces if single image
-        let crop = files.length === 1 ? 6 : 1
-        for (let i = 0; i < crop; i++) {
-          // coords percent
-          let face = vlay.ref[i]
-          let xy = face[face.length - 1].split(',')
-          xy = crop > 1 ? { x: xy[0], y: xy[1] } : null
-          // image resize and crop
-          let canvas = vlay.fileMax(img, xy)
-          let name = 'img_' + vlay.ref[i][0]
-          canvas.title = canvas.id = name
-          fragment.appendChild(canvas)
-
-          // cubemap face from coords
-          if (crop === 6) {
-            cm.push([i + '_' + name, canvas])
-            continue
-          }
-
-          // cubemap face from filename
-          name = file.name.toString().toLowerCase()
-          for (let j = 0; j < flat.length; j++) {
-            let match = name.search(flat[j])
-            console.log(match)
-            //console.log("match", j, name, match);
-            if (match > -1) {
-              name = Math.floor(j / 3) + '_' + name
-              cm.push([name, canvas])
-              break
-            } else if (j === flat.length) {
-              cm.push([name, canvas])
-            }
-          }
-        }
-
-        // await cubemap, sort, and proceed
-        if (cm.length >= files.length) {
-          document.getElementById('boxmap').appendChild(fragment)
-          cm.sort()
-          vlay.proc({ box: cm, id: 'box' })
-        }
-
-        img = null
-      }
-      img.src = tex
-    }
   }
 }
 
 //
 // BEGIN
 //vlay.ini()
-document.getElementById('pics').addEventListener('change', vlay.click)
+document.getElementById('pics').addEventListener('change', vlay.util.click)
 //debug...
 window.vlay = vlay
 //
 
 export default function App(props) {
-  const [scene] = useState(() => vlay.ini())
+  const vanilla = new THREE.Scene()
+  const output = (vlay.var.out = new THREE.Group())
+  output.name = 'output'
+  vanilla.add(output)
+
+  vlay.init()
+
+  const [scene] = useState(() => vanilla)
+
+  // INIT SCENE, FIRST-RUN
+
+  // PROC-GEN
+  vlay.proc()
+  controls()
 
   useLayoutEffect(() => {
     return () => void scene.dispose()
   }, [scene])
+
+  //const cRef = useRef()
+
+  //useFrame(() => {
+  // if (hover) {
+  //   boxRef.current.rotation.y += 0.05
+  // }
+  //})
+  //ref={cRef}
 
   const R = vlay.R
   return (
@@ -636,19 +651,25 @@ export default function App(props) {
       <gridHelper args={[R * 8, 8]} position={[0, -0.1, 0]} />
       <axesHelper args={[R * 2]} />
       <Ground receiveShadow mirror={1} blur={[256, 256]} mixBlur={4} mixStrength={0.25} rotation={[-Math.PI / 2, 0, Math.PI / 2]} />
-      <mesh name={'CSG'} castShadow>
-        <Subtraction useGroups>
-          <Subtraction a useGroups>
-            <Brush a geometry={vlay.csg.geo} material={vlay.mat.pos} />
-            <Brush b geometry={vlay.csg.neg} material={vlay.mat.neg} />
-          </Subtraction>
-          <Brush b position={[0, 0, 0]}>
-            <icosahedronGeometry args={[R / 2, 1]} />
-          </Brush>
-        </Subtraction>
-      </mesh>
+      <CSG />
       <primitive object={scene} {...props} />
     </Canvas>
+  )
+}
+
+function CSG(props) {
+  return (
+    <mesh name={'CSG'} castShadow>
+      <Subtraction useGroups>
+        <Subtraction a useGroups>
+          <Brush a geometry={vlay.csg.geo} material={vlay.mat.pos} />
+          <Brush b geometry={vlay.csg.neg} material={vlay.mat.neg} />
+        </Subtraction>
+        <Brush b position={[0, 0, 0]}>
+          <icosahedronGeometry args={[vlay.R / 2, 1]} />
+        </Brush>
+      </Subtraction>
+    </mesh>
   )
 }
 
@@ -663,19 +684,19 @@ function Ground(props) {
 const controls = () => {
   const gui = new GUI()
   gui
-    .add(vlay.set, 'seed', 0, 1)
+    .add(vlay.opt, 'seed', 0, 1)
     .step(0.01)
     .onChange(function (n) {
       vlay.proc({ s: n })
     })
   gui
-    .add(vlay.set, 'proc', 1, 4)
+    .add(vlay.opt, 'proc', 1, 4)
     .step(1)
     .onChange(function (n) {
       vlay.proc({ p: n })
     })
   gui
-    .add(vlay.set, 'show', 0, 3)
+    .add(vlay.opt, 'show', 0, 3)
     .step(1)
     .onChange(function (n) {
       let onion = ['box', 'neg', 'pos']
