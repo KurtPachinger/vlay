@@ -1,17 +1,17 @@
-import './styles.scss'
 import * as THREE from 'three'
-import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js'
+import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+//threejs.org/examples/?q=modifi#webgl_modifier_subdivision
+//threejs.org/examples/?q=simp#webgl_modifier_simplifier
+//three/examples/jsm/materials/MeshGouraudMaterial.js
 import { useRef, useState, useMemo } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, MeshReflectorMaterial } from '@react-three/drei'
 import { Brush, Subtraction, Addition } from '@react-three/csg'
-//threejs.org/examples/?q=modifi#webgl_modifier_subdivision
-//threejs.org/examples/?q=simp#webgl_modifier_simplifier
-//three/examples/jsm/materials/MeshGouraudMaterial.js
 
-let vlay = {
-  R: 10,
+const R = 10
+const vlay = {
+  R: R,
   raycast: new THREE.Raycaster(),
   pointer: new THREE.Vector3(),
   opt: { seed: 0.5, proc: 1, show: 0 },
@@ -19,12 +19,10 @@ let vlay = {
     uid: {}
   },
   csg: {
-    geo: new THREE.IcosahedronGeometry(1, 1),
-    neg: new THREE.BufferGeometry(),
-    pos: new THREE.BufferGeometry()
+    /* geo, neg, pos*/
   },
   mat: {
-    box: new THREE.BoxGeometry(1, 1, 1, 2, 2, 2),
+    box: new THREE.BoxBufferGeometry(R, R, R, 2, 2, 2),
     img: new THREE.MeshBasicMaterial({
       name: 'img',
       side: THREE.DoubleSide, //ray intersects
@@ -60,6 +58,24 @@ let vlay = {
       ['nz', 'negz', 'back', '.75,.33']
     ]
   },
+  init: function () {
+    controls()
+
+    //vlay.csg.geo = new THREE.IcosahedronGeometry(vlay.R, 6)
+
+    // BOXMAP
+    let pos = vlay.mat.box.getAttribute('position')
+    let vtx = new THREE.Vector3()
+    for (var i = 0; i < pos.count; i++) {
+      vtx.fromBufferAttribute(pos, i)
+      let mult = (vlay.R * 2) / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
+      vtx.multiplyScalar(mult)
+      pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
+    }
+    vlay.mat.box.name = 'boxmap'
+
+    vlay.proc()
+  },
   util: {
     clear: function (sel = []) {
       if (sel.type === 'Group') {
@@ -72,6 +88,8 @@ let vlay = {
             el.material.forEach(function (cubeface) {
               cubeface.map.dispose()
             })
+          } else if (el.name === 'neg' || el.name === 'pos') {
+            el.geometry.dispose()
           }
           sel.remove(el)
         }
@@ -200,71 +218,59 @@ let vlay = {
     }
   },
   proc: async function (opts = {}) {
-    //
+    console.log('proc', opts.p)
 
-    let promise = new Promise((resolve, reject) => {
-      console.log('proc', opts)
+    if (!opts.init) {
+      // INIT
+      opts.init = true
+      opts.p = opts.p || vlay.opt.proc
+      opts.s = opts.s || vlay.opt.seed
+      opts.id = 'default'
+      //opts.id = [opts.id || 'noise', opts.s, opts.p].join('_')
 
-      if (!opts.init) {
-        // INIT
-        opts.init = true
-        opts.p = opts.p || vlay.opt.proc
-        opts.s = opts.s || vlay.opt.uid
-        opts.id = 'default'
-        //opts.id = [opts.id || 'noise', opts.s, opts.p].join('_')
+      // RESET
+      vlay.util.clear(vlay.var.out.current.getObjectByName(opts.id))
+      // GROUP
+      opts.group = new THREE.Group()
+      opts.group.name = opts.id
+      vlay.var.out.current.add(opts.group)
 
-        // RESET
-        vlay.util.clear(vlay.var.out.current.getObjectByName(opts.id))
-        // GROUP
-        opts.group = new THREE.Group()
-        opts.group.name = opts.id
-        vlay.var.out.current.add(opts.group)
+      // CUBEMAP
+      vlay.mat.map = vlay.cubemap(opts.box || 0, opts)
+      let box = new THREE.Mesh(vlay.mat.box, vlay.mat.map)
+      box.name = 'box'
+      box.renderOrder = 2
+      opts.group.add(box)
 
-        // CUBEMAP
-        vlay.mat.map = vlay.cubemap(opts.box || 0, opts)
-        let box = new THREE.Mesh(vlay.mat.box, vlay.mat.map)
-        box.name = 'box'
-        box.renderOrder = 2
-        opts.group.add(box)
+      // MANTLE
+      opts.group.userData.mantle = {}
 
-        // MANTLE
-        opts.group.userData.mantle = {}
-
-        opts.geo = new THREE.IcosahedronGeometry(vlay.R, 6)
-
-        //opts.geo = new THREE.IcosahedronGeometry(vlay.R, 6)
-
-        //*
-        // todo: use local geo but apply changes back (pos, col)
-        //*
+      let geo = vlay.csg.geo.current.geometry
+      // *** to-do: memoize & reset position from userData ***
+      geo.computeBoundingSphere()
+      if (!geo.getAttribute('color')) {
+        let pos = geo.getAttribute('position')
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       }
+      opts.geo = geo
+    }
 
-      if (opts.p > 0) {
-        opts.geo = vlay.rays(opts)
-        //recurse
-        opts.p--
-        vlay.proc(opts)
-      } else {
-        vlay.csg.geo.current.geometry = opts.geo
-        vlay.csg.geo.current.userData.update = true
-        console.log('proc done...')
-        vlay.defects(opts.group)
-        resolve('done!')
-      }
-    })
-
-    let result = await promise
+    if (opts.p > 0) {
+      opts.geo = await vlay.rays(opts)
+      //recurse
+      opts.p--
+      vlay.proc(opts)
+    } else {
+      vlay.defects(opts.group)
+    }
   },
   rays: function (opts) {
     let blurs = []
-
-    console.log('geo', vlay.csg)
     //console.log('rays', opts)
 
     // cubemap PYR attenuate/convolute
-    let target = opts.group.getObjectByName('box').material
-
     let k = vlay.opt.proc - opts.p + 1
+    let target = opts.group.getObjectByName('box').material
     for (let i = 0; i < target.length; i++) {
       let material = target[i].map.source.data
       let blur = document.createElement('canvas')
@@ -274,20 +280,13 @@ let vlay = {
       blurs.push(blur)
     }
 
-    // raycast
-    let geo = opts.geo
-    geo.computeBoundingSphere()
-
-    let ctr = new THREE.Vector3(0, 0, 0)
-    let dir = new THREE.Vector3()
-    // elevation, color
-    let pos = geo.getAttribute('position')
-    //console.log('POS', pos)
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
-    let col = geo.getAttribute('color')
-    // mantle (cavities)
+    // raycast at vertices (for elevation, color)
+    const col = opts.geo.getAttribute('color')
+    const pos = opts.geo.getAttribute('position')
+    const ctr = opts.geo.boundingSphere.center
+    const dir = new THREE.Vector3()
+    // defects from boxmap (for surface features)
     let mantle = opts.group.userData.mantle
-    // raycast at cubemap through vertices
 
     for (let i = 0; i < pos.count; i++) {
       vlay.pointer.fromBufferAttribute(pos, i)
@@ -337,12 +336,10 @@ let vlay = {
         }
       }
     }
-    opts.geo.computeVertexNormals()
-    opts.geo.attributes.position.needsUpdate = true
 
     // cleanup
     vlay.util.clear(blurs)
-    return geo
+    return opts.geo
   },
   defects: function (group) {
     // face defects to mesh and CSG
@@ -427,16 +424,6 @@ let vlay = {
       topo(coord, feat, depth)
     }
 
-    // cavities buffer geometry to mesh
-    //fitline = mergeVertices(fitline, 0.5)
-    let fitline = new THREE.PlaneBufferGeometry(1, 1)
-
-    let neg = new THREE.Mesh(fit.neg || fitline, vlay.mat.neg)
-    neg.name = neg.geometry.name = 'neg'
-    let pos = new THREE.Mesh(fit.pos || fitline, vlay.mat.pos)
-    pos.name = pos.geometry.name = 'pos'
-    pos.castShadow = pos.receiveShadow = true
-
     function ft(feat, toBox, num) {
       // re-classify features
       let f = { neg: false, pos: false }
@@ -481,7 +468,7 @@ let vlay = {
         if (feat === 'pos' && !f.pos) {
           let pt = coord[i]
           let d = 1 + depth[i].d * 2
-          geo = new THREE.BoxGeometry(d, d, d)
+          geo = new THREE.BoxBufferGeometry(d, d, d)
           geo.translate(pt.x, pt.y, pt.z)
         }
 
@@ -519,11 +506,23 @@ let vlay = {
         col.setXYZ(i, 1 - d, s, s)
       }
     }
-    //
+
     console.log('fit', fit)
-    // OUTPUT
-    group.add(pos, neg)
-    vlay.csg.neg.current.geometry = neg.geometry
+    let fitline = new THREE.PlaneBufferGeometry(1, 1)
+    let feats = ['neg', 'pos']
+    feats.forEach(function (feat) {
+      // cavities buffer geometry to mesh
+      let csg = new THREE.Mesh(fit[feat] || fitline, vlay.mat[feat])
+      csg.name = csg.geometry.name = feat
+      if (feat === 'pos') {
+        csg.castShadow = csg.receiveShadow = true
+      }
+      group.add(csg)
+      vlay.csg[feat].current.geometry = csg.geometry
+    })
+
+    // r3f
+    vlay.csg.geo.current.userData.update = true
   },
   cubemap: function (num, opts) {
     function noise(canvas) {
@@ -580,7 +579,6 @@ let vlay = {
 
     return cubemap
   },
-
   gen: function (id, uei = 1) {
     // uid from seed (from last or root)
     let S = vlay.var.uid[id]
@@ -592,41 +590,54 @@ let vlay = {
   }
 }
 
-//
-// BEGIN
-//vlay.ini()
-document.getElementById('pics').addEventListener('change', vlay.util.click)
-//debug...
+const controls = () => {
+  const gui = new GUI()
+  gui
+    .add(vlay.opt, 'seed', 0, 1)
+    .step(0.01)
+    .onChange(function (n) {
+      vlay.proc({ s: n })
+    })
+  gui
+    .add(vlay.opt, 'proc', 1, 10)
+    .step(1)
+    .onChange(function (n) {
+      vlay.proc({ p: n })
+    })
+  gui
+    .add(vlay.opt, 'show', 0, 3)
+    .step(1)
+    .onChange(function (n) {
+      let onion = ['box', 'neg', 'pos']
+      vlay.var.out.current.children.forEach(function (group) {
+        let planet = group.children
+        for (let i = 0; i < planet.length; i++) {
+          let mesh = planet[i]
+          let show = onion.indexOf(mesh.name) >= n
+          mesh.visible = show
+        }
+      })
+    })
+}
+// DEBUG...
 window.vlay = vlay
-//
 
 export default function App(props) {
-  controls()
-  // output
-  const out = useRef()
-  vlay.var.out = out
-
-  // BOXMAP
-  let pos = vlay.mat.box.getAttribute('position')
-  let vtx = new THREE.Vector3()
-  for (var i = 0; i < pos.count; i++) {
-    vtx.fromBufferAttribute(pos, i)
-    let mult = (vlay.R * 2) / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
-    vtx.multiplyScalar(mult)
-    pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
-  }
-  vlay.mat.box.name = 'boxmap'
+  // output, positive defects
+  vlay.var.out = useRef()
+  vlay.csg.pos = useRef()
 
   const R = vlay.R * 4
   return (
-    // frameloop="demand"
-    <Canvas shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.proc()}>
+    // frameloop="demand" / invalidate
+    <Canvas shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init()}>
       <OrbitControls makeDefault />
       <pointLight intensity={6} position={[0, R, R * 2]} castShadow />
       <pointLight intensity={2} position={[0, R / 4, 0]} castShadow />
       <gridHelper args={[R * 2, 4]} position={0} />
       <axesHelper args={[R / 2]} />
-      <group ref={out} name="out" />
+      <group ref={vlay.var.out} name="out" />
+      <mesh ref={vlay.csg.pos} material={vlay.mat.pos} />
       <mesh name={'CSG'} castShadow>
         <CSG />
       </mesh>
@@ -640,31 +651,30 @@ function CSG(props) {
   //docs.pmnd.rs/react-three-fiber/api/events
 
   // RAY-TEST LAYERS
-  const geo = useRef()
-  const neg = useRef()
-  vlay.csg.geo = geo
-  vlay.csg.neg = neg
+  vlay.csg.geo = useRef()
+  vlay.csg.neg = useRef()
 
-  useFrame((state, geo) => {
+  useFrame((state) => {
     const geom = vlay.csg.geo.current
     if (geom && geom.userData.update) {
-      console.log(state)
+      console.log('r3f', state.gl.info)
       geom.userData.update = false
-      geom.geometry.computeBoundingSphere()
+      //geom.geometry.computeBoundingSphere()
       geom.geometry.computeVertexNormals()
-      //
       geom.needsUpdate = true
     }
   })
 
+  const geo = new THREE.IcosahedronBufferGeometry(vlay.R, 3)
+  const neg = new THREE.BufferGeometry()
   return (
     <Subtraction useGroups>
       <Subtraction a useGroups>
-        <Brush a ref={geo} material={vlay.mat.pos} {...props} />
-        <Brush b ref={neg} material={vlay.mat.neg} />
+        <Brush a ref={vlay.csg.geo} geometry={geo} material={vlay.mat.pos} {...props} />
+        <Brush b ref={vlay.csg.neg} geometry={neg} material={vlay.mat.neg} />
       </Subtraction>
       <Brush b>
-        <icosahedronGeometry args={[vlay.R / 2, 1]} />
+        <icosahedronBufferGeometry args={[vlay.R / 2, 1]} />
       </Brush>
     </Subtraction>
   )
@@ -686,34 +696,4 @@ function Mirror(props) {
       />
     </mesh>
   )
-}
-
-const controls = () => {
-  const gui = new GUI()
-  gui
-    .add(vlay.opt, 'seed', 0, 1)
-    .step(0.01)
-    .onChange(function (n) {
-      vlay.proc({ s: n })
-    })
-  gui
-    .add(vlay.opt, 'proc', 1, 4)
-    .step(1)
-    .onChange(function (n) {
-      vlay.proc({ p: n })
-    })
-  gui
-    .add(vlay.opt, 'show', 0, 3)
-    .step(1)
-    .onChange(function (n) {
-      let onion = ['box', 'neg', 'pos']
-      vlay.var.out.current.children.forEach(function (group) {
-        let planet = group.children
-        for (let i = 0; i < planet.length; i++) {
-          let mesh = planet[i]
-          let show = onion.indexOf(mesh.name) >= n
-          mesh.visible = show
-        }
-      })
-    })
 }
