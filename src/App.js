@@ -35,20 +35,21 @@ let vlay = {
     }),
     neg: new THREE.MeshPhongMaterial({
       name: 'neg',
-      color: 0x8080c0,
+      specular: 0x8080c0,
       vertexColors: true,
-      flatShading: true,
+      //flatShading: true,
       transparent: true,
+      shininess: 15,
       opacity: 0.9,
       side: THREE.FrontSide,
       shadowSide: THREE.FrontSide
     }),
-    pos: new THREE.MeshStandardMaterial({
+    pos: new THREE.MeshPhongMaterial({
       name: 'pos',
-      color: 0xc08080,
+      //color: 0x802020,
+      specular: 0x804040,
       vertexColors: true,
-      metalness: 0.33,
-      roughness: 0.66
+      shininess: 2
     }),
     xyz: [
       ['px', 'posx', 'right', '.50,.33'],
@@ -428,7 +429,7 @@ let vlay = {
 
     // cavities buffer geometry to mesh
     //fitline = mergeVertices(fitline, 0.5)
-    let fitline = new THREE.PlaneGeometry(1, 1)
+    let fitline = new THREE.PlaneBufferGeometry(1, 1)
 
     let neg = new THREE.Mesh(fit.neg || fitline, vlay.mat.neg)
     neg.name = neg.geometry.name = 'neg'
@@ -625,50 +626,47 @@ export default function App(props) {
       <pointLight intensity={2} position={[0, R / 4, 0]} castShadow />
       <gridHelper args={[R * 2, 4]} position={0} />
       <axesHelper args={[R / 2]} />
+      <group ref={out} name="out" />
+      <mesh name={'CSG'} castShadow>
+        <CSG />
+      </mesh>
       <Mirror />
-
-      <CSG {...props} />
-
-      <group ref={out} name="out" {...props} />
     </Canvas>
   )
 }
 
-function CSG(...props) {
+function CSG(props) {
   //https://codesandbox.io/s/busy-swirles-eckvc1
   //docs.pmnd.rs/react-three-fiber/api/events
 
   // RAY-TEST LAYERS
-  const mesh = useRef()
   const geo = useRef()
   const neg = useRef()
-  vlay.csg.mesh = mesh
   vlay.csg.geo = geo
   vlay.csg.neg = neg
 
-  useFrame((state, geo, neg) => {
-    if (vlay.csg.geo.current && vlay.csg.geo.current.userData.update) {
+  useFrame((state, geo) => {
+    const geom = vlay.csg.geo.current
+    if (geom && geom.userData.update) {
       console.log(state)
-      vlay.csg.geo.current.userData.update = false
-      vlay.csg.geo.current.geometry.computeBoundingSphere()
-      vlay.csg.geo.current.geometry.computeVertexNormals()
+      geom.userData.update = false
+      geom.geometry.computeBoundingSphere()
+      geom.geometry.computeVertexNormals()
       //
-      vlay.csg.geo.current.needsUpdate = true
+      geom.needsUpdate = true
     }
   })
 
   return (
-    <mesh ref={mesh} material={vlay.mat.pos} name={'CSG'} castShadow {...props}>
-      <Subtraction useGroups>
-        <Subtraction a useGroups>
-          <Brush a ref={geo} material={vlay.mat.pos} {...props} />
-          <Brush b ref={neg} material={vlay.mat.neg} {...props} />
-        </Subtraction>
-        <Brush b>
-          <icosahedronGeometry args={[vlay.R / 2, 1]} />
-        </Brush>
+    <Subtraction useGroups>
+      <Subtraction a useGroups>
+        <Brush a ref={geo} material={vlay.mat.pos} {...props} />
+        <Brush b ref={neg} material={vlay.mat.neg} />
       </Subtraction>
-    </mesh>
+      <Brush b>
+        <icosahedronGeometry args={[vlay.R / 2, 1]} />
+      </Brush>
+    </Subtraction>
   )
 }
 
