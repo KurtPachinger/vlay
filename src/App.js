@@ -2,11 +2,13 @@ import './styles.scss'
 import * as THREE from 'three'
 import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js'
-import { useRef } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { OrbitControls, Reflector } from '@react-three/drei'
+import { useRef, useState, useMemo } from 'react'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { OrbitControls, MeshReflectorMaterial } from '@react-three/drei'
 import { Brush, Subtraction, Addition } from '@react-three/csg'
-//
+//threejs.org/examples/?q=modifi#webgl_modifier_subdivision
+//threejs.org/examples/?q=simp#webgl_modifier_simplifier
+//three/examples/jsm/materials/MeshGouraudMaterial.js
 
 let vlay = {
   R: 10,
@@ -17,14 +19,13 @@ let vlay = {
     uid: {}
   },
   csg: {
-    geo: new THREE.BufferGeometry(),
+    geo: new THREE.IcosahedronGeometry(1, 1),
     neg: new THREE.BufferGeometry(),
     pos: new THREE.BufferGeometry()
   },
   mat: {
-    box: null,
+    box: new THREE.BoxGeometry(1, 1, 1, 2, 2, 2),
     img: new THREE.MeshBasicMaterial({
-      //color: 0x00ffff,
       name: 'img',
       side: THREE.DoubleSide, //ray intersects
       //map: terrain,
@@ -197,25 +198,6 @@ let vlay = {
       return canvas
     }
   },
-  init: function () {
-    console.log('init')
-
-    // MAP BOX-SPHERE FOR TARGET
-    const R = vlay.R * 2
-    vlay.mat.box = new THREE.BoxGeometry(vlay.R, vlay.R, vlay.R, 2, 2, 2)
-    let pos = vlay.mat.box.getAttribute('position')
-    let vtx = new THREE.Vector3()
-    for (var i = 0; i < pos.count; i++) {
-      vtx.fromBufferAttribute(pos, i)
-      let mult = R / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
-      vtx.multiplyScalar(mult)
-      pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
-    }
-    vlay.mat.box.name = 'boxmap'
-
-    // RAY-TEST LAYERS
-    vlay.proc()
-  },
   proc: async function (opts = {}) {
     //
 
@@ -263,6 +245,7 @@ let vlay = {
         vlay.proc(opts)
       } else {
         vlay.csg.geo.current.geometry = opts.geo
+        vlay.csg.geo.current.userData.update = true
         console.log('proc done...')
         vlay.defects(opts.group)
         resolve('done!')
@@ -617,22 +600,36 @@ window.vlay = vlay
 //
 
 export default function App(props) {
+  controls()
   // output
-  const gRef = useRef()
-  vlay.var.out = gRef
+  const out = useRef()
+  vlay.var.out = out
 
-  const R = vlay.R
+  // BOXMAP
+  let pos = vlay.mat.box.getAttribute('position')
+  let vtx = new THREE.Vector3()
+  for (var i = 0; i < pos.count; i++) {
+    vtx.fromBufferAttribute(pos, i)
+    let mult = (vlay.R * 2) / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
+    vtx.multiplyScalar(mult)
+    pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
+  }
+  vlay.mat.box.name = 'boxmap'
+
+  const R = vlay.R * 4
   return (
     // frameloop="demand"
-    <Canvas shadows camera={{ position: [0, R * 4, R * 4] }} onCreated={(state) => vlay.init()}>
+    <Canvas shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.proc()}>
       <OrbitControls makeDefault />
-      <pointLight intensity={6} position={[0, R * 4, R * 8]} castShadow />
-      <pointLight intensity={4} decay={R * 16} position={[0, R / 2, 0]} castShadow />
-      <gridHelper args={[R * 8, 8]} position={[0, -0.1, 0]} />
-      <axesHelper args={[R * 2]} />
-      <Ground receiveShadow mirror={1} blur={[256, 256]} mixBlur={4} mixStrength={0.25} rotation={[-Math.PI / 2, 0, Math.PI / 2]} />
+      <pointLight intensity={6} position={[0, R, R * 2]} castShadow />
+      <pointLight intensity={2} position={[0, R / 4, 0]} castShadow />
+      <gridHelper args={[R * 2, 4]} position={0} />
+      <axesHelper args={[R / 2]} />
+      <Mirror />
+
       <CSG {...props} />
-      <group ref={gRef} name="out" {...props} />
+
+      <group ref={out} name="out" {...props} />
     </Canvas>
   )
 }
@@ -640,31 +637,34 @@ export default function App(props) {
 function CSG(...props) {
   //https://codesandbox.io/s/busy-swirles-eckvc1
   //docs.pmnd.rs/react-three-fiber/api/events
-  controls()
 
-  const bool = useRef()
-  const brushA = useRef()
-  const brushB = useRef()
-  vlay.csg.bool = bool
-  vlay.csg.geo = brushA
-  vlay.csg.neg = brushB
+  // RAY-TEST LAYERS
+  const mesh = useRef()
+  const geo = useRef()
+  const neg = useRef()
+  vlay.csg.mesh = mesh
+  vlay.csg.geo = geo
+  vlay.csg.neg = neg
 
-  //useFrame((bool, state) => {
-  //  if (bool.current && state.requireUpdate) {
-  //    console.log(state)
-  //   bool.current.needsUpdate = true
-  //  }
-  //})
+  useFrame((state, geo, neg) => {
+    if (vlay.csg.geo.current && vlay.csg.geo.current.userData.update) {
+      console.log(state)
+      vlay.csg.geo.current.userData.update = false
+      vlay.csg.geo.current.geometry.computeBoundingSphere()
+      vlay.csg.geo.current.geometry.computeVertexNormals()
+      //
+      vlay.csg.geo.current.needsUpdate = true
+    }
+  })
 
   return (
-    //onUpdate={(self) => (self.verticesNeedUpdate = true)}
-    <mesh ref={bool} name={'CSG'} castShadow {...props}>
+    <mesh ref={mesh} material={vlay.mat.pos} name={'CSG'} castShadow {...props}>
       <Subtraction useGroups>
         <Subtraction a useGroups>
-          <Brush a ref={brushA} material={vlay.mat.pos} onUpdate={(self) => (self.needsUpdate = true)} {...props} />
-          <Brush b ref={brushB} material={vlay.mat.neg} onChange={(self) => (self.needsUpdate = true)} {...props} />
+          <Brush a ref={geo} material={vlay.mat.pos} {...props} />
+          <Brush b ref={neg} material={vlay.mat.neg} {...props} />
         </Subtraction>
-        <Brush b position={[0, 0, 0]}>
+        <Brush b>
           <icosahedronGeometry args={[vlay.R / 2, 1]} />
         </Brush>
       </Subtraction>
@@ -672,17 +672,26 @@ function CSG(...props) {
   )
 }
 
-function Ground(props) {
+function Mirror(props) {
   return (
-    <Reflector resolution={256} args={[vlay.R * 8, vlay.R * 8]} {...props}>
-      {(Material, props) => <Material color="#f0f0f0" transparent opacity={0.66} {...props} />}
-    </Reflector>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
+      <planeGeometry args={[vlay.R * 8, vlay.R * 8]} />
+      <MeshReflectorMaterial
+        blur={[256, 128]}
+        resolution={1024}
+        mixBlur={1}
+        mixStrength={30}
+        roughness={1}
+        depthScale={0.3}
+        color="#202020"
+        metalness={0.6}
+      />
+    </mesh>
   )
 }
 
 const controls = () => {
   const gui = new GUI()
-
   gui
     .add(vlay.opt, 'seed', 0, 1)
     .step(0.01)
