@@ -6,7 +6,7 @@ const R = 10
 const vlay = {
   v: {
     R: R,
-    opt: { seed: 0.5, iter: 1, view: 0 },
+    opt: { iter: 1, seed: 0.5, view: 0 },
     csg: {
       /* geo, neg, pos */
     },
@@ -221,15 +221,15 @@ const vlay = {
           vlay.gcut({ i: n })
         })
       let view = gui
-        .add(vlay.v.opt, 'view', 0, 3)
+        .add(vlay.v.opt, 'view', 0, 4)
         .step(1)
         .listen()
         .onChange(function (n) {
-          let onion = ['box', 'neg', 'pos']
-          vlay.v.out.current.children.forEach(function (group) {
-            let planet = group.children
-            for (let i = 0; i < planet.length; i++) {
-              let mesh = planet[i]
+          let onion = ['box', 'neg', 'pos', 'poi', 'CSG']
+          vlay.v.out.current.children.forEach(function (obj) {
+            let meshes = obj.type === 'Group' ? obj.children : [obj]
+            for (let i = 0; i < meshes.length; i++) {
+              let mesh = meshes[i]
               let view = onion.indexOf(mesh.name) >= n
               mesh.visible = view
             }
@@ -275,7 +275,7 @@ const vlay = {
       opt.group.add(box)
 
       // MANTLE
-      opt.group.userData.mantle = {}
+      opt.group.userData.contour = {}
 
       let geo = vlay.v.csg.geo.current.geometry
       // *** to-do: memoize & reset position from userData ***
@@ -319,7 +319,7 @@ const vlay = {
     const ctr = opt.geo.boundingSphere.center
     const dir = new THREE.Vector3()
     // defects from boxmap (for surface features)
-    let mantle = opt.group.userData.mantle
+    let contour = opt.group.userData.contour
     const v_raycast = new THREE.Raycaster()
     const v_pointer = new THREE.Vector3()
 
@@ -361,13 +361,13 @@ const vlay = {
         let defect = [dist, opt.i, xyz, face].join('|')
 
         // defect tolerance
-        if (mantle[face] === undefined) {
-          mantle[face] = []
+        if (contour[face] === undefined) {
+          contour[face] = []
         }
         if (dist < vlay.v.R * 0.2) {
-          mantle[face].push(defect + '|pos')
+          contour[face].push(defect + '|pos')
         } else if (dist < vlay.v.R * 0.4) {
-          mantle[face].push(defect + '|neg')
+          contour[face].push(defect + '|neg')
         }
       }
     }
@@ -379,42 +379,42 @@ const vlay = {
   segs: function (group) {
     // face defects to mesh and CSG
 
-    const userData = group.userData
     // fit roi contour to landmark type
     let fit = {
       pos: 0,
       neg: 0,
       cluster: { c: 0 }
     }
-
-    Object.keys(userData.mantle).forEach(function (face) {
-      // sort face distance and de-dupe
-      let defects = userData.mantle[face].sort().reverse()
-      defects = [...new Set(defects)]
+    const contours = []
+    const maxSegs = 6
+    Object.keys(group.userData.contour).forEach(function (face) {
+      // de-dupe, minimum, and sort distance
+      let defects = [...new Set(group.userData.contour[face])]
+      if (defects.length < 3) {
+        return
+      }
+      defects.sort().reverse()
       // limit segments
-      let delta = Math.ceil(defects.length / 6)
+      let delta = Math.ceil(defects.length / maxSegs)
       delta = Math.max(delta, 1)
-      let seg = []
+      let segs = []
       for (let i = 0; i < defects.length; i += delta) {
-        seg.push(defects[i])
+        let defect = defects[i]
+        segs.push(defect)
         // feature type ratio
-        let feat = defects[i].slice(-3)
+        let feat = defect.slice(defect.lastIndexOf('|') + 1)
         fit[feat]++
       }
-      userData.mantle[face] = seg
-      // minimum defects
-      if (defects.length < 3) {
-        delete userData.mantle[face]
-      }
+      contours.push(segs)
     })
     // sort overall distance
-    userData.mantle = Object.values(userData.mantle).sort().reverse()
+    contours.sort().reverse()
     fit.cluster.c = fit.neg / (fit.neg + fit.pos).toFixed(3)
     fit.pos = fit.neg = false
 
-    console.log('defects', userData.mantle)
-    for (let face of Object.keys(userData.mantle)) {
-      let defects = userData.mantle[face]
+    console.log('contours', contours)
+    for (let i = 0; i < contours.length; i++) {
+      let defects = contours[i]
 
       // parse defect
       let cluster = 0
@@ -553,7 +553,9 @@ const vlay = {
         csg.castShadow = csg.receiveShadow = true
       }
       group.add(csg)
-      vlay.v.csg[feat].current.geometry = csg.geometry
+      if (feat === 'neg') {
+        vlay.v.csg[feat].current.geometry = csg.geometry
+      }
     })
 
     // r3f
