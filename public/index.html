@@ -1,8 +1,8 @@
 <fieldset>
-  <legend>cubemap</legend>
-  <div id="texels"></div>
-  <div id="cubemap"></div>
-  <input type="file" id="pics" accept="image/*" multiple />
+  <legend>boxmap</legend>
+  <div id="genmap"></div>
+  <div id="boxmap"></div>
+  <input type="file" id="pics" accept="image/*" multiple onChange="vlay.util.remap(this.files)" />
   <div id="log"></div>
 </fieldset>
 
