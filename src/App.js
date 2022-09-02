@@ -11,7 +11,6 @@ import { Brush, Subtraction, Addition } from '@react-three/csg'
 export default function App(props) {
   // output, positive defects
   vlay.v.out = useRef()
-  vlay.v.csg.pos = useRef()
 
   const R = vlay.v.R * 4
   return (
@@ -22,12 +21,24 @@ export default function App(props) {
       <pointLight intensity={2} position={[0, R / 4, 0]} castShadow />
       <gridHelper args={[R * 2, 4]} position={0} />
       <axesHelper args={[R / 2]} />
-      <group ref={vlay.v.out} name="out" />
-      <mesh ref={vlay.v.csg.pos} material={vlay.mat.pos} />
-      <mesh name={'CSG'} castShadow>
-        <CSG />
+      <group name="out" ref={vlay.v.out}>
+        <mesh name={'CSG'} castShadow>
+          <CSG />
+        </mesh>
+      </group>
+      <mesh name="mirror" rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
+        <planeGeometry args={[R * 2, R * 2]} />
+        <MeshReflectorMaterial
+          blur={[256, 128]}
+          resolution={1024}
+          mixBlur={1}
+          mixStrength={30}
+          roughness={1}
+          depthScale={0.3}
+          color="#202020"
+          metalness={0.6}
+        />
       </mesh>
-      <Mirror />
     </Canvas>
   )
 }
@@ -39,6 +50,7 @@ function CSG(props) {
   // RAY-TEST LAYERS
   vlay.v.csg.geo = useRef()
   vlay.v.csg.neg = useRef()
+  //vlay.v.csg.pos = useRef()
 
   useFrame((state) => {
     const geom = vlay.v.csg.geo.current
@@ -51,7 +63,7 @@ function CSG(props) {
     }
   })
 
-  const geo = new THREE.IcosahedronBufferGeometry(vlay.v.R, 3)
+  const geo = new THREE.IcosahedronBufferGeometry(vlay.v.R * 2, 3)
   const neg = new THREE.PlaneBufferGeometry(0, 0)
   return (
     <Subtraction useGroups>
@@ -63,23 +75,6 @@ function CSG(props) {
         <icosahedronBufferGeometry args={[vlay.v.R / 2, 1]} />
       </Brush>
     </Subtraction>
-  )
-}
-
-function Mirror(props) {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
-      <planeGeometry args={[vlay.v.R * 8, vlay.v.R * 8]} />
-      <MeshReflectorMaterial
-        blur={[256, 128]}
-        resolution={1024}
-        mixBlur={1}
-        mixStrength={30}
-        roughness={1}
-        depthScale={0.3}
-        color="#202020"
-        metalness={0.6}
-      />
-    </mesh>
+    //<mesh name="pos" ref={vlay.v.csg.pos} material={vlay.mat.map} />
   )
 }
