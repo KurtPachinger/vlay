@@ -383,7 +383,8 @@ const vlay = {
     let fit = {
       pos: 0,
       neg: 0,
-      cluster: { c: 0 }
+      cluster: { c: 0 },
+      contour: []
     }
     const contours = []
     const maxSegs = 6
@@ -412,113 +413,110 @@ const vlay = {
     fit.cluster.c = fit.neg / (fit.neg + fit.pos).toFixed(3)
     fit.pos = fit.neg = false
 
+    // classification
     console.log('contours', contours)
     for (let i = 0; i < contours.length; i++) {
       let defects = contours[i]
 
-      // parse defect
       let cluster = 0
-
-      // === 'core' ? 'pos' : 'neg'
-      let coord = []
-      let depth = []
-      let f
+      let c = { vtx: [], dst: [] }
       for (let i = 0; i < defects.length; i++) {
         // 'dist|p|x,y,z|type'
         let defect = defects[i].split('|')
+
         let feat = defect[defect.length - 1]
+        let dist = defect[0] / vlay.v.R
+
+        // sub-classification
+        if (i === 0) {
+          c.sub = scat(feat, dist)
+        }
+
+        // position (path/geometry)
+        let vtx = defect[2]
+        vtx = vtx.split(',')
+        vtx = new THREE.Vector3(+vtx[0], +vtx[1], +vtx[2])
+
+        // normalize
+
         if (feat === 'neg') {
           cluster++
+          if (!c.sub.neg) {
+            // path from center to outside
+            vtx.multiplyScalar(i / (defects.length - 1) + 0.33)
+          }
         }
 
-        let point = defect[2]
-        point = point.split(',')
-        point = new THREE.Vector3(+point[0], +point[1], +point[2])
-
-        // dist for vertex color
-        let dNorm = defect[0] / vlay.v.R
-        depth.push({ d: dNorm, t: defect[defect.length - 1] })
-
-        if (i === 0) {
-          f = ft(feat, dNorm)
-        }
-
-        // path from center to outside
-        if (feat === 'neg' && !f.neg) {
-          point.multiplyScalar(i / (defects.length - 1) + 0.33)
-        }
-
-        // xyz for curve mesh
-        coord.push(point)
+        c.dst.push(dist)
+        c.vtx.push(vtx)
       }
 
       cluster = cluster / defects.length
-      let feat = cluster < fit.cluster.c ? 'pos' : 'neg'
+      c.f = cluster < fit.cluster.c ? 'pos' : 'neg'
 
       // curve defects geometry and color
-      topo(coord, feat, depth)
+      topo(c)
     }
 
-    function ft(feat, toBox, num) {
+    function scat(feat, toBox) {
       // re-classify features
-      let f = { neg: false, pos: false }
+      let sub = { neg: false, pos: false }
       if (feat === 'neg') {
-        f.neg = toBox <= 0.25
+        sub.neg = toBox <= 0.25
       } else {
-        f.pos = toBox >= 0.5
+        sub.pos = toBox >= 0.5
       }
 
-      return f
+      return sub
     }
 
     // CSG tube/s
-    function topo(coord, feat, depth) {
-      let f = ft(feat, depth[0].d)
-      let loop = feat === 'pos' && !f.pos ? coord.length : 1
+    function topo(c) {
+      let loop = c.f === 'pos' && !c.sub.pos ? c.vtx.length : 1
       let geo
 
-      if (feat === 'neg' || f.pos) {
-        const curve = new THREE.CatmullRomCurve3(coord)
+      if (c.f === 'neg' || c.sub.pos) {
+        const curve = new THREE.CatmullRomCurve3(c.vtx)
         const extrude = {
           steps: 8,
           bevelEnabled: false,
           extrudePath: curve
         }
 
-        const pts1 = [],
-          count = 5
-        for (let i = 0; i < count; i++) {
+        const pts = [],
+          cnt = 5
+        for (let i = 0; i < cnt; i++) {
           const l = 1 * loop
-          const a = ((2 * i) / count) * Math.PI
-          pts1.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
+          const a = ((2 * i) / cnt) * Math.PI
+          pts.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
         }
 
-        const ellipsoid = new THREE.Shape(pts1)
+        const ellipsoid = new THREE.Shape(pts)
         geo = new THREE.ExtrudeGeometry(ellipsoid, extrude)
       }
 
       // OUTPUT
 
       for (let i = 0; i < loop; i++) {
-        if (feat === 'pos' && !f.pos) {
-          let pt = coord[i]
-          let d = 1 + depth[i].d * 2
+        if (c.f === 'pos' && !c.sub.pos) {
+          let pt = c.vtx[i]
+          let d = 1 + c.dst[i] * 2
           geo = new THREE.BoxBufferGeometry(d, d, d)
           geo.translate(pt.x, pt.y, pt.z)
         }
 
         //
-        colors(geo, depth)
+        colors(geo, c.dst)
 
         // merge geometry with previous
-        let merge = fit[feat] ? fit[feat] : geo
-        if (fit[feat]) {
-          merge = mergeBufferGeometries([fit[feat], geo], false)
-          fit.cluster[feat]++
+        let merge = fit[c.f] ? fit[c.f] : geo
+        if (fit[c.f]) {
+          merge = mergeBufferGeometries([fit[c.f], geo], false)
+          fit.cluster[c.f]++
         } else {
-          fit.cluster[feat] = 1
+          fit.cluster[c.f] = 1
         }
-        fit[feat] = merge
+        fit[c.f] = merge
       }
     }
 
