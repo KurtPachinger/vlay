@@ -377,8 +377,6 @@ const vlay = {
     return opt.geo
   },
   segs: function (group) {
-    // face defects to mesh and CSG
-
     // fit roi contour to landmark type
     let fit = {
       pos: 0,
@@ -386,10 +384,10 @@ const vlay = {
       cluster: { c: 0 },
       contour: []
     }
-    const contours = []
+
     const maxSegs = 6
     Object.keys(group.userData.contour).forEach(function (face) {
-      // de-dupe, minimum, and sort distance
+      // de-dupe, minimum, sort distance
       let defects = [...new Set(group.userData.contour[face])]
       if (defects.length < 3) {
         return
@@ -402,81 +400,96 @@ const vlay = {
       for (let i = 0; i < defects.length; i += delta) {
         let defect = defects[i]
         segs.push(defect)
-        // feature type ratio
-        let feat = defect.slice(defect.lastIndexOf('|') + 1)
-        fit[feat]++
+        // label cluster
+        let label = defect.slice(defect.lastIndexOf('|') + 1)
+        fit[label]++
       }
-      contours.push(segs)
+      fit.contour.push(segs)
     })
-    // sort overall distance
-    contours.sort().reverse()
-    fit.cluster.c = fit.neg / (fit.neg + fit.pos).toFixed(3)
+    // weight rank
+    fit.contour.sort().reverse()
+    fit.cluster.c = +(fit.pos / (fit.pos + fit.neg)).toFixed(3)
     fit.pos = fit.neg = false
 
     // classification
-    console.log('contours', contours)
-    for (let i = 0; i < contours.length; i++) {
-      let defects = contours[i]
+    console.log('contour', fit.contour)
+    for (let i = 0; i < fit.contour.length; i++) {
+      let defects = fit.contour[i]
 
-      let cluster = 0
-      let c = { vtx: [], dst: [] }
+      const c = { depth: [], point: [], label: 0, forms: 1 }
       for (let i = 0; i < defects.length; i++) {
         // 'dist|p|x,y,z|type'
-        let defect = defects[i].split('|')
+        const defect = defects[i].split('|')
 
-        let feat = defect[defect.length - 1]
-        let dist = defect[0] / vlay.v.R
-
-        // sub-classification
-        if (i === 0) {
-          c.sub = scat(feat, dist)
-        }
+        // color
+        let depth = defect[0] / vlay.v.R
+        c.depth.push(depth)
 
         // position (path/geometry)
-        let vtx = defect[2]
-        vtx = vtx.split(',')
-        vtx = new THREE.Vector3(+vtx[0], +vtx[1], +vtx[2])
+        let point = defect[2]
+        point = point.split(',')
+        point = new THREE.Vector3(+point[0], +point[1], +point[2])
+        c.point.push(point)
 
-        // normalize
-
-        if (feat === 'neg') {
-          cluster++
-          if (!c.sub.neg) {
-            // path from center to outside
-            vtx.multiplyScalar(i / (defects.length - 1) + 0.33)
-          }
+        // weight
+        const label = defect[defect.length - 1]
+        if (label === 'pos') {
+          c.label++
         }
-
-        c.dst.push(dist)
-        c.vtx.push(vtx)
       }
 
-      cluster = cluster / defects.length
-      c.f = cluster < fit.cluster.c ? 'pos' : 'neg'
+      // weight rank
+      let weight = c.label / defects.length
+      c.forms = weight / fit.cluster.c
+      //console.log('weight', weight, c.label, defects.length, 'rank', c.forms, fit.cluster.c)
+      c.label = c.forms >= 1 ? 'pos' : 'neg'
 
-      // curve defects geometry and color
+      // curve defects
+      profile(c)
       topo(c)
     }
 
-    function scat(feat, toBox) {
-      // re-classify features
-      let sub = { neg: false, pos: false }
-      if (feat === 'neg') {
-        sub.neg = toBox <= 0.25
-      } else {
-        sub.pos = toBox >= 0.5
+    function profile(c) {
+      console.log('profile', c)
+      // feature
+      let poi = c.forms > 1.25 || c.forms < 0.75
+      // process
+      let dif = c.depth[0] - c.depth[c.depth.length - 1]
+
+      // classify connected geo-morph system
+      let system = poi || dif > vlay.v.R / 8
+
+      // output form-specific transforms
+      // ex: (c.label===pos && dif > 2) offset vertical
+      // ex: (c.label===pos && c.forms > 2 ) offset orbital
+      if (!system && c.label === 'neg') {
+        // ...depending on depth, no deep negative rocks
+        // non-system cluster orbital offset increase w/ height
+        // also scale (in topo) decrease w/ height
+        c.label = 'pos'
       }
 
-      return sub
+      console.log(c.forms, dif)
+      for (let i = 0; i < c.point.length; i++) {
+        const point = c.point[i]
+        const int = i / (c.point.length - 1) + c.forms
+
+        const orbital = new THREE.Vector3(int, int, int)
+
+        //point.multiplyScalar(i / (c.point.length - 1) + 0.33)
+        point.multiply(orbital)
+      }
+
+      c.forms = system ? 1 : c.point.length
     }
 
-    // CSG tube/s
     function topo(c) {
-      let loop = c.f === 'pos' && !c.sub.pos ? c.vtx.length : 1
+      console.log('topo', c)
+      // face defects to mesh and CSG
       let geo
 
-      if (c.f === 'neg' || c.sub.pos) {
-        const curve = new THREE.CatmullRomCurve3(c.vtx)
+      if (c.forms === 1) {
+        const curve = new THREE.CatmullRomCurve3(c.point)
         const extrude = {
           steps: 8,
           bevelEnabled: false,
@@ -486,7 +499,7 @@ const vlay = {
         const pts = [],
           cnt = 5
         for (let i = 0; i < cnt; i++) {
-          const l = 1 * loop
+          const l = vlay.v.R / 8
           const a = ((2 * i) / cnt) * Math.PI
           pts.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
         }
@@ -497,44 +510,43 @@ const vlay = {
 
       // OUTPUT
 
-      for (let i = 0; i < loop; i++) {
-        if (c.f === 'pos' && !c.sub.pos) {
-          let pt = c.vtx[i]
-          let d = 1 + c.dst[i] * 2
+      for (let i = 0; i < c.forms; i++) {
+        if (c.label === 'pos' && c.forms > 1) {
+          let pt = c.point[i]
+          let d = 1 + c.depth[i] * 2
           geo = new THREE.BoxBufferGeometry(d, d, d)
           geo.translate(pt.x, pt.y, pt.z)
         }
 
         //
-        colors(geo, c.dst)
+        color(geo, c.label)
 
-        // merge geometry with previous
-        let merge = fit[c.f] ? fit[c.f] : geo
-        if (fit[c.f]) {
-          merge = mergeBufferGeometries([fit[c.f], geo], false)
-          fit.cluster[c.f]++
+        let merge = fit[c.label] ? fit[c.label] : geo
+        if (fit[c.label]) {
+          // merge geometry with previous
+          merge = mergeBufferGeometries([fit[c.label], geo], false)
+          fit.cluster[c.label]++
         } else {
-          fit.cluster[c.f] = 1
+          fit.cluster[c.label] = 1
         }
-        fit[c.f] = merge
+        fit[c.label] = merge
       }
     }
 
-    function colors(geo, depth) {
+    function color(geo, label) {
       // colors
       let pos = geo.getAttribute('position')
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       let col = geo.getAttribute('color')
       // vertex color
-      let pointer = new THREE.Vector3()
+      let v_pointer = new THREE.Vector3()
       for (let i = 0; i < pos.count; i++) {
         // vertex distance
-        pointer.fromBufferAttribute(pos, i)
-        let d = pointer.distanceTo(new THREE.Vector3(0, 0, 0))
+        v_pointer.fromBufferAttribute(pos, i)
+        let d = v_pointer.distanceTo(new THREE.Vector3(0, 0, 0))
         d = vlay.v.R / d
         // curve data
-        let pt = depth[Math.floor((i / pos.count) * depth.length)]
-        let s = pt.t === 'core' ? 0.125 : 0.5
+        let s = label === 'neg' ? 0.125 : 0.5
 
         col.setXYZ(i, 1 - d, s, s)
       }
