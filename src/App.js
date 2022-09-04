@@ -5,7 +5,7 @@ import * as THREE from 'three'
 //three/examples/jsm/materials/MeshGouraudMaterial.js
 import { useRef, useState, useMemo } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, MeshReflectorMaterial } from '@react-three/drei'
+import { OrbitControls, MeshReflectorMaterial, AdaptiveDpr } from '@react-three/drei'
 import { Brush, Subtraction, Addition } from '@react-three/csg'
 
 export default function App(props) {
@@ -15,7 +15,7 @@ export default function App(props) {
   const R = vlay.v.R * 4
   return (
     // frameloop="demand" / invalidate
-    <Canvas shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init()}>
+    <Canvas frameloop="demand" performance={{ min: 0.1 }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
       <OrbitControls makeDefault />
       <pointLight intensity={6} position={[0, R, R * 2]} castShadow />
       <pointLight intensity={2} position={[0, R / 4, 0]} castShadow />
@@ -39,12 +39,13 @@ export default function App(props) {
           metalness={0.6}
         />
       </mesh>
+      <AdaptiveDpr />
     </Canvas>
   )
 }
 
 function CSG(props) {
-  //https://codesandbox.io/s/busy-swirles-eckvc1
+  //codesandbox.io/s/busy-swirles-eckvc1
   //docs.pmnd.rs/react-three-fiber/api/events
 
   // RAY-TEST LAYERS
@@ -57,7 +58,7 @@ function CSG(props) {
     if (geom && geom.userData.update) {
       console.log('r3f', state.gl.info)
       geom.userData.update = false
-      //geom.geometry.computeBoundingSphere()
+      // invalidate stale mutated
       geom.geometry.computeVertexNormals()
       geom.needsUpdate = true
     }
