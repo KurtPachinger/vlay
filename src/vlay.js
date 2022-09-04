@@ -49,9 +49,9 @@ const vlay = {
       ['nz', 'negz', 'back', '.75,.33']
     ]
   },
-  init: function () {
-    // called once r3f canvas created
-    // geo/refs defined in CSG module
+  init: function (state) {
+    // r3f canvas created state
+    vlay.util.gui = vlay.util.gui(state)
 
     // BOXMAP
     let pos = vlay.mat.box.getAttribute('position')
@@ -65,7 +65,6 @@ const vlay = {
     vlay.mat.box.name = 'boxmap'
 
     // output
-    vlay.util.gui = vlay.util.gui()
     vlay.gcut()
   },
   util: {
@@ -206,18 +205,21 @@ const vlay = {
 
       return canvas
     },
-    gui: function () {
+    gui: function (state) {
       const gui = new GUI()
       gui
         .add(vlay.v.opt, 'seed', 0, 1)
         .step(0.01)
         .onFinishChange(function (n) {
+          state.invalidate()
           vlay.gcut({ s: n })
         })
       gui
         .add(vlay.v.opt, 'iter', 1, 10)
         .step(1)
         .onFinishChange(function (n) {
+          state.invalidate()
+          //state.performance.regress()
           vlay.gcut({ i: n })
         })
       let view = gui
@@ -225,6 +227,7 @@ const vlay = {
         .step(1)
         .listen()
         .onChange(function (n) {
+          state.invalidate()
           let onion = ['box', 'neg', 'pos', 'poi', 'CSG']
           vlay.v.out.current.children.forEach(function (obj) {
             let meshes = obj.type === 'Group' ? obj.children : [obj]
@@ -293,6 +296,7 @@ const vlay = {
       opt.i--
       vlay.gcut(opt)
     } else {
+      // output
       vlay.segs(opt.group)
       vlay.util.gui.load(opt.view)
     }
@@ -379,9 +383,9 @@ const vlay = {
   segs: function (group) {
     // fit roi contour to landmark type
     let fit = {
-      pos: 0,
-      neg: 0,
-      cluster: { c: 0 },
+      pos: false,
+      neg: false,
+      cluster: { c: 0, pos: 0, neg: 0 },
       contour: []
     }
 
@@ -402,27 +406,27 @@ const vlay = {
         segs.push(defect)
         // label cluster
         let label = defect.slice(defect.lastIndexOf('|') + 1)
-        fit[label]++
+        fit.cluster[label]++
+        fit.cluster.c++
       }
       fit.contour.push(segs)
     })
     // weight rank
     fit.contour.sort().reverse()
-    fit.cluster.c = +(fit.pos / (fit.pos + fit.neg)).toFixed(3)
-    fit.pos = fit.neg = false
+    fit.cluster.c = Number((fit.cluster.pos / fit.cluster.c).toFixed(3))
 
     // classification
     console.log('contour', fit.contour)
     for (let i = 0; i < fit.contour.length; i++) {
       let defects = fit.contour[i]
 
-      const c = { depth: [], point: [], label: 0, forms: 1 }
+      let c = { depth: [], point: [], label: 0, forms: 1 }
       for (let i = 0; i < defects.length; i++) {
         // 'dist|p|x,y,z|type'
         const defect = defects[i].split('|')
 
         // color
-        let depth = defect[0] / vlay.v.R
+        let depth = Number((defect[0] / vlay.v.R).toFixed(3))
         c.depth.push(depth)
 
         // position (path/geometry)
@@ -439,25 +443,24 @@ const vlay = {
       }
 
       // weight rank
+
       let weight = c.label / defects.length
-      c.forms = weight / fit.cluster.c
-      //console.log('weight', weight, c.label, defects.length, 'rank', c.forms, fit.cluster.c)
+      c.forms = Number((weight / fit.cluster.c).toFixed(3)) || 0
       c.label = c.forms >= 1 ? 'pos' : 'neg'
 
       // curve defects
+      //console.log('c', c)
       profile(c)
-      topo(c)
     }
 
     function profile(c) {
-      console.log('profile', c)
       // feature
       let poi = c.forms > 1.25 || c.forms < 0.75
       // process
-      let dif = c.depth[0] - c.depth[c.depth.length - 1]
+      let dif = c.depth[0] / c.depth[c.depth.length - 1]
 
       // classify connected geo-morph system
-      let system = poi || dif > vlay.v.R / 8
+      let system = poi || dif > 4
 
       // output form-specific transforms
       // ex: (c.label===pos && dif > 2) offset vertical
@@ -469,7 +472,6 @@ const vlay = {
         c.label = 'pos'
       }
 
-      console.log(c.forms, dif)
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
         const int = i / (c.point.length - 1) + c.forms
@@ -481,10 +483,11 @@ const vlay = {
       }
 
       c.forms = system ? 1 : c.point.length
+
+      topo(c)
     }
 
     function topo(c) {
-      console.log('topo', c)
       // face defects to mesh and CSG
       let geo
 
@@ -516,21 +519,27 @@ const vlay = {
           let d = 1 + c.depth[i] * 2
           geo = new THREE.BoxBufferGeometry(d, d, d)
           geo.translate(pt.x, pt.y, pt.z)
+          // merge attributes same
+          geo = geo.toNonIndexed()
+          geo.index = null
         }
 
-        //
         color(geo, c.label)
 
-        let merge = fit[c.label] ? fit[c.label] : geo
-        if (fit[c.label]) {
+        let last = fit[c.label]
+        let merge = last ? last : geo
+        if (last) {
           // merge geometry with previous
-          merge = mergeBufferGeometries([fit[c.label], geo], false)
-          fit.cluster[c.label]++
+          merge = mergeBufferGeometries([last, geo], false)
+          merge.userData.count = last.userData.count + 1
+          merge.userData.mergedUserData = null
         } else {
-          fit.cluster[c.label] = 1
+          merge.userData.count = 1
         }
+
         fit[c.label] = merge
       }
+      // maybe nothing
     }
 
     function color(geo, label) {
@@ -555,16 +564,18 @@ const vlay = {
     console.log('fit', fit)
     let fitline = new THREE.PlaneBufferGeometry(0, 0)
     let feats = ['neg', 'pos']
-    feats.forEach(function (feat) {
+    feats.forEach(function (label) {
       // cavities buffer geometry to mesh
-      let csg = new THREE.Mesh(fit[feat] || fitline, vlay.mat[feat])
-      csg.name = csg.geometry.name = feat
-      if (feat === 'pos') {
+
+      let csg = new THREE.Mesh(fit[label] || fitline, vlay.mat[label])
+      csg.name = csg.geometry.name = label
+
+      if (label === 'pos') {
         csg.castShadow = csg.receiveShadow = true
       }
       group.add(csg)
-      if (feat === 'neg') {
-        vlay.v.csg[feat].current.geometry = csg.geometry
+      if (label === 'neg') {
+        vlay.v.csg[label].current.geometry = csg.geometry
       }
     })
 
