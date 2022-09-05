@@ -59,7 +59,7 @@ const vlay = {
     let vtx = new THREE.Vector3()
     for (let i = 0; i < pos.count; i++) {
       vtx.fromBufferAttribute(pos, i)
-      let mult = (vlay.v.R * 2) / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
+      let mult = (vlay.v.R * 4) / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
       vtx.multiplyScalar(mult)
       pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
     }
@@ -218,15 +218,14 @@ const vlay = {
         .add(vlay.v.opt, 'iter', 1, 10)
         .step(1)
         .onFinishChange(function (n) {
-          //state.performance.regress()
           vlay.gcut({ i: n })
         })
       let view = gui
-        .add(vlay.v.opt, 'view', 0, 4)
+        .add(vlay.v.opt, 'view', 0, 3)
         .step(1)
         .listen()
         .onChange(function (n) {
-          let onion = ['box', 'neg', 'pos', 'poi', 'CSG']
+          let onion = ['box', 'neg', 'pos', 'CSG']
           vlay.v.out.current.children.forEach(function (obj) {
             let meshes = obj.type === 'Group' ? obj.children : [obj]
             for (let i = 0; i < meshes.length; i++) {
@@ -254,6 +253,7 @@ const vlay = {
     console.log('gcut', opt.i)
 
     if (!opt.init) {
+      //vlay.v.state.performance.regress()
       // INIT
       opt.init = true
       opt.i = opt.i || vlay.v.opt.iter
@@ -298,11 +298,11 @@ const vlay = {
       vlay.gcut(opt)
     } else {
       // output
-      let group = await vlay.segs(opt.group)
+      opt.group = await vlay.segs(opt.group)
+      vlay.util.gui.load(opt.view)
       // update r3f
       vlay.v.csg.geo.current.userData.update = true
       vlay.v.state.invalidate()
-      vlay.util.gui.load(opt.view)
     }
   },
   morph: function (opt) {
@@ -311,9 +311,9 @@ const vlay = {
     // cubemap PYR attenuate/convolute
     let blurs = []
     let k = vlay.v.opt.iter - opt.i + 1
-    let target = opt.group.getObjectByName('box').material
-    for (let i = 0; i < target.length; i++) {
-      let material = target[i].map.source.data
+    let target = opt.group.getObjectByName('box')
+    for (let i = 0; i < target.material.length; i++) {
+      let material = target.material[i].map.source.data
       let blur = document.createElement('canvas')
       let ctx = blur.getContext('2d')
       blur.width = blur.height = k
@@ -337,11 +337,11 @@ const vlay = {
       v_pointer.multiply(new THREE.Vector3(jitter, jitter, jitter))
       v_raycast.set(ctr, dir.subVectors(v_pointer, ctr).normalize())
 
-      const intersects = v_raycast.intersectObjects(opt.group.children, false)
+      const intersects = v_raycast.intersectObject(target, false)
       if (intersects.length) {
         // cubemap sample (rgba, distance)
         let intersect = intersects[0]
-        let relax = intersect.point.multiplyScalar(0.75)
+        let relax = intersect.point.multiplyScalar(0.5)
 
         // rgba from uv PYR
         let uv = intersect.uv
@@ -359,7 +359,7 @@ const vlay = {
         // displace elevation
         let disp = new THREE.Vector3()
         disp.copy(v_pointer.multiplyScalar(1 - d * (1 / opt.i)))
-        disp.lerp(relax, 0.25)
+        disp.lerp(relax, 0.5)
         pos.setXYZ(i, disp.x, disp.y, disp.z)
         // mantle (crust, core)
         // BVH-CSG cavities, extreme peak/valley
@@ -451,24 +451,25 @@ const vlay = {
       }
 
       // weight rank
-
       let weight = c.label / defects.length
       c.forms = Number((weight / fit.cluster.c).toFixed(3)) || 0
       c.label = c.forms >= 1 ? 'pos' : 'neg'
 
       // curve defects
-      //console.log('c', c)
+      console.log('c', c)
       profile(c)
     }
 
     function profile(c) {
       // feature
-      let poi = c.forms > 1.25 || c.forms < 0.75
+      let poi = c.forms > 1.2 || c.forms < 0.8
       // process
       let dif = c.depth[0] / c.depth[c.depth.length - 1]
+      //dif = c.depth[0] / c.depth[c.depth.length - 1]
+      // dif > vlay.v.R/32
 
       // classify connected geo-morph system
-      let system = poi || dif > 4
+      let system = poi || dif < 15
 
       // output form-specific transforms
       // ex: (c.label===pos && dif > 2) offset vertical
@@ -477,17 +478,33 @@ const vlay = {
         // ...depending on depth, no deep negative rocks
         // non-system cluster orbital offset increase w/ height
         // also scale (in topo) decrease w/ height
-        c.label = 'pos'
+        //c.label = 'pos'
       }
 
+      let mult = c.label === 'neg' ? 0.25 + c.forms : 1 + c.forms
+      let orbital = new THREE.Vector3(mult, mult, mult)
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
-        const int = i / (c.point.length - 1) + c.forms
+        let prc = i / c.point.length
 
-        const orbital = new THREE.Vector3(int, int, int)
-
-        //point.multiplyScalar(i / (c.point.length - 1) + 0.33)
-        point.multiply(orbital)
+        if (c.label === 'neg') {
+          if (system) {
+            // tubes from center
+            point.multiplyScalar(prc + 0.25)
+          } else {
+            // boxes form pool
+            point.multiply(orbital)
+            point.multiplyScalar(prc + 0.25)
+            // boxes form core
+            //point.multiplyScalar(prc / 2)
+          }
+        } else if (c.label === 'pos') {
+          if (system) {
+          } else {
+            point.multiply(orbital)
+          }
+        }
+        //
       }
 
       c.forms = system ? 1 : c.point.length
@@ -499,44 +516,46 @@ const vlay = {
       // face defects to mesh and CSG
       let geo
 
-      if (c.forms === 1) {
-        // connected
-        const curve = new THREE.CatmullRomCurve3(c.point)
-        const extrude = {
-          steps: 8,
-          bevelEnabled: false,
-          extrudePath: curve
-        }
-
-        const pts = [],
-          cnt = 5
-        for (let i = 0; i < cnt; i++) {
-          const l = vlay.v.R / 8
-          const a = ((2 * i) / cnt) * Math.PI
-          pts.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
-        }
-
-        const ellipsoid = new THREE.Shape(pts)
-        geo = new THREE.ExtrudeGeometry(ellipsoid, extrude)
-      }
-
       // OUTPUT mesh (CSG)
       for (let i = 0; i < c.forms; i++) {
-        if (c.label === 'pos' && c.forms > 1) {
+        if (c.forms > 1) {
           // not connected
           let pt = c.point[i]
-          let d = 1 + c.depth[i] * 2
+          let d = (1 + c.depth[i]) * (vlay.v.R / 2)
           geo = new THREE.BoxBufferGeometry(d, d, d)
+          geo.rotateX(c.depth[i] * 2)
+          geo.rotateY(1 - c.depth[i] * 4)
+          geo.rotateZ(c.depth[i] * 8)
           geo.translate(pt.x, pt.y, pt.z)
           // merge attributes same
           geo = geo.toNonIndexed()
           geo.index = null
+        } else {
+          // connected
+          const curve = new THREE.CatmullRomCurve3(c.point)
+          const extrude = {
+            steps: 8,
+            bevelEnabled: false,
+            extrudePath: curve
+          }
+
+          const pts = [],
+            cnt = 5
+          for (let i = 0; i < cnt; i++) {
+            const l = vlay.v.R / 8
+            const a = ((2 * i) / cnt) * Math.PI
+            pts.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
+          }
+
+          const ellipsoid = new THREE.Shape(pts)
+          geo = new THREE.ExtrudeGeometry(ellipsoid, extrude)
         }
 
         color(geo, c.label)
 
         let last = fit[c.label]
         let merge = last ? last : geo
+
         if (last) {
           // merge geometry with previous
           merge = mergeBufferGeometries([last, geo], false)
@@ -552,6 +571,10 @@ const vlay = {
     }
 
     function color(geo, label) {
+      if (label === 'neg') {
+        // not visible
+        return
+      }
       // colors
       let pos = geo.getAttribute('position')
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
@@ -562,8 +585,9 @@ const vlay = {
         // vertex distance
         v_pointer.fromBufferAttribute(pos, i)
         let d = v_pointer.distanceTo(new THREE.Vector3(0, 0, 0))
-        d = vlay.v.R / d
-        // curve data
+        d = d / (vlay.v.R * 4)
+
+        // curve data (i.e. cluster)
         let s = label === 'neg' ? 0.125 : 0.5
 
         col.setXYZ(i, 1 - d, s, s)
@@ -588,7 +612,7 @@ const vlay = {
       }
     })
 
-    // r3f
+    // output
     group.userData = { fit: fit.cluster }
     return group
   },
