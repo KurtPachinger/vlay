@@ -51,7 +51,8 @@ const vlay = {
   },
   init: function (state) {
     // r3f canvas created state
-    vlay.util.gui = vlay.util.gui(state)
+    vlay.v.state = state
+    vlay.util.gui = vlay.util.gui()
 
     // BOXMAP
     let pos = vlay.mat.box.getAttribute('position')
@@ -205,20 +206,18 @@ const vlay = {
 
       return canvas
     },
-    gui: function (state) {
+    gui: function () {
       const gui = new GUI()
       gui
         .add(vlay.v.opt, 'seed', 0, 1)
         .step(0.01)
         .onFinishChange(function (n) {
-          state.invalidate()
           vlay.gcut({ s: n })
         })
       gui
         .add(vlay.v.opt, 'iter', 1, 10)
         .step(1)
         .onFinishChange(function (n) {
-          state.invalidate()
           //state.performance.regress()
           vlay.gcut({ i: n })
         })
@@ -227,7 +226,6 @@ const vlay = {
         .step(1)
         .listen()
         .onChange(function (n) {
-          state.invalidate()
           let onion = ['box', 'neg', 'pos', 'poi', 'CSG']
           vlay.v.out.current.children.forEach(function (obj) {
             let meshes = obj.type === 'Group' ? obj.children : [obj]
@@ -237,6 +235,7 @@ const vlay = {
               mesh.visible = view
             }
           })
+          vlay.v.state.invalidate()
         })
 
       return view
@@ -281,6 +280,8 @@ const vlay = {
       opt.group.userData.contour = {}
 
       let geo = vlay.v.csg.geo.current.geometry
+      geo.attributes.position.copy(geo.userData.geo.attributes.position)
+      geo.attributes.position.needsUpdate = true
       // *** to-do: memoize & reset position from userData ***
       geo.computeBoundingSphere()
       if (!geo.getAttribute('color')) {
@@ -297,7 +298,10 @@ const vlay = {
       vlay.gcut(opt)
     } else {
       // output
-      vlay.segs(opt.group)
+      let group = await vlay.segs(opt.group)
+      // update r3f
+      vlay.v.csg.geo.current.userData.update = true
+      vlay.v.state.invalidate()
       vlay.util.gui.load(opt.view)
     }
   },
@@ -414,6 +418,10 @@ const vlay = {
     // weight rank
     fit.contour.sort().reverse()
     fit.cluster.c = Number((fit.cluster.pos / fit.cluster.c).toFixed(3))
+    if (!isFinite(fit.cluster.c)) {
+      // no contours
+      fit.cluster.c = 0.5
+    }
 
     // classification
     console.log('contour', fit.contour)
@@ -492,6 +500,7 @@ const vlay = {
       let geo
 
       if (c.forms === 1) {
+        // connected
         const curve = new THREE.CatmullRomCurve3(c.point)
         const extrude = {
           steps: 8,
@@ -511,10 +520,10 @@ const vlay = {
         geo = new THREE.ExtrudeGeometry(ellipsoid, extrude)
       }
 
-      // OUTPUT
-
+      // OUTPUT mesh (CSG)
       for (let i = 0; i < c.forms; i++) {
         if (c.label === 'pos' && c.forms > 1) {
+          // not connected
           let pt = c.point[i]
           let d = 1 + c.depth[i] * 2
           geo = new THREE.BoxBufferGeometry(d, d, d)
@@ -580,26 +589,25 @@ const vlay = {
     })
 
     // r3f
-    vlay.v.csg.geo.current.userData.update = true
+    group.userData = { fit: fit.cluster }
+    return group
   },
   matgen: function (num, opt) {
     function noise(canvas) {
+      let m = (canvas.width = canvas.height = 8)
       let ctx = canvas.getContext('2d')
-      const w = ctx.canvas.width,
-        h = ctx.canvas.height,
-        iData = ctx.createImageData(w, h),
-        buffer32 = new Uint32Array(iData.data.buffer),
-        len = buffer32.length
-      let i = 0
 
-      for (; i < len; i++) {
-        // argb (elevation)
-        buffer32[i] = Number('0x' + vlay.util.gen(opt.id))
-        //buffer32[i] += 0x80000000;
+      for (let x = 0; x < m; x++) {
+        for (let y = 0; y < m; y++) {
+          ctx.fillStyle = '#' + vlay.util.gen(opt.id)
+          ctx.fillRect(x, y, 1, 1)
+        }
       }
 
-      ctx.putImageData(iData, 0, 0)
+      //ctx.putImageData(iData, 0, 0)
       let tex = new THREE.CanvasTexture(canvas)
+      tex.type = THREE.UnsignedByteType
+      tex.format = THREE.RGBAFormat
 
       return tex
     }
@@ -612,13 +620,11 @@ const vlay = {
     let ts = Date.now()
     let fragment = new DocumentFragment()
     for (let i = 0; i < 6; i++) {
-      const canvas = document.createElement('canvas')
-
       let terrain
       if (!num) {
+        const canvas = document.createElement('canvas')
         // random noise (...game of life?)
         canvas.id = canvas.title = 'rnd_' + vlay.mat.xyz[i][0] + '_' + ts
-        canvas.width = canvas.height = 8
         terrain = noise(canvas)
         fragment.appendChild(canvas)
       } else {
