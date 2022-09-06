@@ -66,7 +66,7 @@ function CSG(props) {
 
   const neg = new THREE.PlaneBufferGeometry(0, 0)
   const geo = new THREE.IcosahedronBufferGeometry(vlay.v.R * 2, 3)
-  geo.userData.geo = geo.clone()
+  geo.userData.pos = geo.attributes.position.clone()
 
   return (
     <Subtraction useGroups>
