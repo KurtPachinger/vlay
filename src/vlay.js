@@ -280,7 +280,7 @@ const vlay = {
       opt.group.userData.contour = {}
 
       let geo = vlay.v.csg.geo.current.geometry
-      geo.attributes.position.copy(geo.userData.geo.attributes.position)
+      geo.attributes.position.copy(geo.userData.pos)
       geo.attributes.position.needsUpdate = true
       // *** to-do: memoize & reset position from userData ***
       geo.computeBoundingSphere()
@@ -428,7 +428,7 @@ const vlay = {
     for (let i = 0; i < fit.contour.length; i++) {
       let defects = fit.contour[i]
 
-      let c = { depth: [], point: [], label: 0, forms: 1 }
+      let c = { depth: [], point: [], label: 0, forms: 0 }
       for (let i = 0; i < defects.length; i++) {
         // 'dist|p|x,y,z|type'
         const defect = defects[i].split('|')
@@ -456,7 +456,7 @@ const vlay = {
       c.label = c.forms >= 1 ? 'pos' : 'neg'
 
       // curve defects
-      console.log('c', c)
+      //console.log('c', c)
       profile(c)
     }
 
@@ -465,64 +465,54 @@ const vlay = {
       let poi = c.forms > 1.2 || c.forms < 0.8
       // process
       let dif = c.depth[0] / c.depth[c.depth.length - 1]
-      //dif = c.depth[0] / c.depth[c.depth.length - 1]
-      // dif > vlay.v.R/32
-
       // classify connected geo-morph system
       let system = poi || dif < 15
 
-      // output form-specific transforms
-      // ex: (c.label===pos && dif > 2) offset vertical
-      // ex: (c.label===pos && c.forms > 2 ) offset orbital
-      if (!system && c.label === 'neg') {
-        // ...depending on depth, no deep negative rocks
-        // non-system cluster orbital offset increase w/ height
-        // also scale (in topo) decrease w/ height
-        //c.label = 'pos'
-      }
-
+      // form-specific transforms
       let mult = c.label === 'neg' ? 0.25 + c.forms : 1 + c.forms
-      let orbital = new THREE.Vector3(mult, mult, mult)
+      let dilate = new THREE.Vector3(mult, mult, mult)
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
-        let prc = i / c.point.length
+        let prc = (i + 1) / c.point.length
 
         if (c.label === 'neg') {
           if (system) {
-            // tubes from center
+            // tube (radial cave)
             point.multiplyScalar(prc + 0.25)
           } else {
-            // boxes form pool
-            point.multiply(orbital)
-            point.multiplyScalar(prc + 0.25)
-            // boxes form core
-            //point.multiplyScalar(prc / 2)
+            // box (central cave)
+            point.multiply(dilate)
+            point.multiplyScalar(prc)
           }
         } else if (c.label === 'pos') {
           if (system) {
+            // tube (surface crust)
           } else {
-            point.multiply(orbital)
+            // box (orbital cloud)
+            point.multiply(dilate)
           }
         }
         //
       }
 
-      c.forms = system ? 1 : c.point.length
+      system = system ? 1 : c.point.length
 
-      topo(c)
+      topo(c, system)
     }
 
-    function topo(c) {
+    function topo(c, system) {
       // face defects to mesh and CSG
       let geo
 
       // OUTPUT mesh (CSG)
-      for (let i = 0; i < c.forms; i++) {
-        if (c.forms > 1) {
+      for (let i = 0; i < system; i++) {
+        if (system > 1) {
           // not connected
           let pt = c.point[i]
           let d = (1 + c.depth[i]) * (vlay.v.R / 2)
-          geo = new THREE.BoxBufferGeometry(d, d, d)
+          //geo = new THREE.BoxBufferGeometry(d, d, d)
+          geo = new THREE.TetrahedronGeometry(d, 1)
+          geo.scale(c.forms, c.forms, c.forms)
           geo.rotateX(c.depth[i] * 2)
           geo.rotateY(1 - c.depth[i] * 4)
           geo.rotateZ(c.depth[i] * 8)
@@ -628,11 +618,7 @@ const vlay = {
         }
       }
 
-      //ctx.putImageData(iData, 0, 0)
       let tex = new THREE.CanvasTexture(canvas)
-      tex.type = THREE.UnsignedByteType
-      tex.format = THREE.RGBAFormat
-
       return tex
     }
 
