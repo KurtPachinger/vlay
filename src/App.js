@@ -49,8 +49,9 @@ function CSG(props) {
   //docs.pmnd.rs/react-three-fiber/api/events
 
   // RAY-TEST LAYERS
-  vlay.v.csg.geo = useRef()
   vlay.v.csg.neg = useRef()
+  vlay.v.csg.geo = useRef()
+
   //vlay.v.csg.pos = useRef()
 
   useFrame((state) => {
@@ -78,6 +79,5 @@ function CSG(props) {
         <icosahedronBufferGeometry args={[vlay.v.R, 1]} />
       </Brush>
     </Subtraction>
-    //<mesh name="pos" ref={vlay.v.csg.pos} material={vlay.mat.map} />
   )
 }
