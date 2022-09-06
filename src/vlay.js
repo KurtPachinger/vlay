@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js'
+import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js'
 import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 const R = 10
@@ -30,7 +31,7 @@ const vlay = {
       transparent: true,
       shininess: 15,
       opacity: 0.9,
-      side: THREE.FrontSide,
+      side: THREE.DoubleSide,
       shadowSide: THREE.FrontSide
     }),
     pos: new THREE.MeshPhongMaterial({
@@ -225,7 +226,8 @@ const vlay = {
         .step(1)
         .listen()
         .onChange(function (n) {
-          let onion = ['box', 'neg', 'pos', 'CSG']
+          let onion = ['box', 'neg', 'CSG', 'pos']
+          //let onion = ['box', 'pos', 'CSG', 'neg']
           vlay.v.out.current.children.forEach(function (obj) {
             let meshes = obj.type === 'Group' ? obj.children : [obj]
             for (let i = 0; i < meshes.length; i++) {
@@ -469,7 +471,7 @@ const vlay = {
       let system = poi || dif < 15
 
       // form-specific transforms
-      let mult = c.label === 'neg' ? 0.25 + c.forms : 1 + c.forms
+      let mult = c.label === 'neg' ? 0.25 : 1 + c.forms
       let dilate = new THREE.Vector3(mult, mult, mult)
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
@@ -480,9 +482,10 @@ const vlay = {
             // tube (radial cave)
             point.multiplyScalar(prc + 0.25)
           } else {
+            c.label = 'pos'
             // box (central cave)
             point.multiply(dilate)
-            point.multiplyScalar(prc)
+            //point.multiplyScalar(prc)
           }
         } else if (c.label === 'pos') {
           if (system) {
@@ -495,31 +498,36 @@ const vlay = {
         //
       }
 
-      system = system ? 1 : c.point.length
+      c.system = system ? 1 : c.point.length
 
-      topo(c, system)
+      topo(c)
     }
 
-    function topo(c, system) {
+    function topo(c) {
       // face defects to mesh and CSG
-      let geo
+      let geo = []
 
       // OUTPUT mesh (CSG)
-      for (let i = 0; i < system; i++) {
-        if (system > 1) {
+      for (let i = 0; i < c.system; i++) {
+        let buf
+        let hull = false
+        if (c.system > 1) {
           // not connected
           let pt = c.point[i]
           let d = (1 + c.depth[i]) * (vlay.v.R / 2)
-          //geo = new THREE.BoxBufferGeometry(d, d, d)
-          geo = new THREE.TetrahedronGeometry(d, 1)
-          geo.scale(c.forms, c.forms, c.forms)
-          geo.rotateX(c.depth[i] * 2)
-          geo.rotateY(1 - c.depth[i] * 4)
-          geo.rotateZ(c.depth[i] * 8)
-          geo.translate(pt.x, pt.y, pt.z)
+          buf = new THREE.TetrahedronGeometry(d, 1)
+          // params
+          buf.scale(c.forms, c.forms, c.forms)
+          buf.rotateX(c.depth[i] * 2)
+          buf.rotateY(1 - c.depth[i] * 4)
+          buf.rotateZ(c.depth[i] * 8)
+          buf.translate(pt.x, pt.y, pt.z)
           // merge attributes same
-          geo = geo.toNonIndexed()
-          geo.index = null
+          //buf = buf.toNonIndexed()
+          //buf.index = null
+
+          // metaballs or marching cube
+          hull = c.depth[i] / c.depth[i - 1] < 2.5
         } else {
           // connected
           const curve = new THREE.CatmullRomCurve3(c.point)
@@ -528,45 +536,80 @@ const vlay = {
             bevelEnabled: false,
             extrudePath: curve
           }
-
+          // params
           const pts = [],
             cnt = 5
           for (let i = 0; i < cnt; i++) {
-            const l = vlay.v.R / 8
+            const l = (vlay.v.R * c.forms) / 4
             const a = ((2 * i) / cnt) * Math.PI
             pts.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
           }
-
           const ellipsoid = new THREE.Shape(pts)
-          geo = new THREE.ExtrudeGeometry(ellipsoid, extrude)
+          buf = new THREE.ExtrudeGeometry(ellipsoid, extrude)
+          // ...maybe SimplifyModifier on turned edges
+          hull = c.forms < 1
         }
-
-        color(geo, c.label)
-
-        let last = fit[c.label]
-        let merge = last ? last : geo
-
-        if (last) {
-          // merge geometry with previous
-          merge = mergeBufferGeometries([last, geo], false)
-          merge.userData.count = last.userData.count + 1
-          merge.userData.mergedUserData = null
-        } else {
-          merge.userData.count = 1
-        }
-
-        fit[c.label] = merge
+        align(geo, buf, hull, c.label)
       }
-      // maybe nothing
+
+      // merge geometries with all previous
+      let last = fit[c.label]
+      let merge = last ? [last, geo].flat() : [geo].flat()
+      merge = mergeBufferGeometries(merge, false)
+      // feedback
+      if (!last) {
+        merge.userData.count = c.system
+      } else {
+        merge.userData.count = last.userData.count + c.system
+        merge.userData.mergedUserData = null
+      }
+
+      fit[c.label] = merge
+    }
+
+    function align(geo, buf, hull, c) {
+      if (hull) {
+        // convex hull
+        const vertices = []
+        const hulls = []
+        hulls.push(buf)
+        if (geo.length > 0) {
+          hulls.push(geo[geo.length - 1])
+        }
+        // consolidate
+        hulls.forEach(function (geom) {
+          let pos = geom.getAttribute('position')
+          for (let i = 0; i < pos.count; i++) {
+            const vertex = new THREE.Vector3()
+            vertex.fromBufferAttribute(pos, i)
+            vertices.push(vertex)
+          }
+        })
+        // replace last
+        buf = new ConvexGeometry(vertices)
+      }
+
+      // final pass
+      buf = mergeVertices(buf)
+      color(buf, c.label)
+
+      // output
+      if (hull && c.system > 1) {
+        geo[geo.length - 1] = buf
+      } else {
+        geo.push(buf)
+      }
     }
 
     function color(geo, label) {
+      // CSG and MergeBufferGeometries require same attributes
       if (label === 'neg') {
         // not visible
         return
       }
       // colors
       let pos = geo.getAttribute('position')
+      geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       let col = geo.getAttribute('color')
       // vertex color
@@ -579,7 +622,6 @@ const vlay = {
 
         // curve data (i.e. cluster)
         let s = label === 'neg' ? 0.125 : 0.5
-
         col.setXYZ(i, 1 - d, s, s)
       }
     }
