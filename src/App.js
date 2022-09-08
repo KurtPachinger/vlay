@@ -65,8 +65,8 @@ function CSG(props) {
     }
   })
 
-  const neg = new THREE.PlaneBufferGeometry(0, 0)
-  const geo = new THREE.IcosahedronBufferGeometry(vlay.v.R * 2, 3)
+  const neg = new THREE.PlaneGeometry(0, 0)
+  const geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 3)
   geo.userData.pos = geo.attributes.position.clone()
 
   return (
@@ -76,7 +76,7 @@ function CSG(props) {
         <Brush b ref={vlay.v.csg.neg} geometry={neg} material={vlay.mat.neg} />
       </Subtraction>
       <Brush b>
-        <icosahedronBufferGeometry args={[vlay.v.R, 1]} />
+        <icosahedronGeometry args={[vlay.v.R, 1]} />
       </Brush>
     </Subtraction>
   )
