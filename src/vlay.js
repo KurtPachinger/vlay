@@ -14,7 +14,7 @@ const vlay = {
     uid: {}
   },
   mat: {
-    box: new THREE.BoxBufferGeometry(R, R, R, 2, 2, 2),
+    box: new THREE.BoxGeometry(R, R, R, 2, 2, 2),
     img: new THREE.MeshBasicMaterial({
       name: 'img',
       side: THREE.DoubleSide, //ray intersects
@@ -109,8 +109,8 @@ const vlay = {
         return
       }
 
-      let flat = vlay.mat.xyz.flat()
       vlay.util.reset('boxmap')
+      let xyz = vlay.mat.xyz.flat()
       const cm = []
 
       let fragment = new DocumentFragment()
@@ -125,37 +125,45 @@ const vlay = {
 
           // extract cube faces if single image
           let crop = files.length === 1 ? 6 : 1
-          for (let i = 0; i < crop; i++) {
-            // coords percent
-            let face = vlay.mat.xyz[i]
-            let xy = face[face.length - 1].split(',')
-            xy = crop > 1 ? { x: xy[0], y: xy[1] } : null
-            // image resize and crop
-            let canvas = vlay.util.refit(img, xy)
-            let name = 'img_' + vlay.mat.xyz[i][0]
-            canvas.title = canvas.id = name
-            fragment.appendChild(canvas)
+          for (let j = 0; j < crop; j++) {
+            let xy = false
+            let name
+            if (crop === 6) {
+              // coords percent
+              let face = vlay.mat.xyz[j]
+              xy = face[face.length - 1].split(',')
+              xy = { x: xy[0], y: xy[1] }
+              if (img.width < img.height) {
+                xy.z = (-90 * Math.PI) / 180
+              }
+              name = 'img_' + vlay.mat.xyz[j][0]
+            }
 
             // cubemap face from coords
-            if (crop === 6) {
-              cm.push([i + '_' + name, canvas])
-              continue
-            }
+            let canvas = vlay.util.refit(img, xy)
 
-            // cubemap face from filename
-            name = file.name.toString().toLowerCase()
-            for (let j = 0; j < flat.length; j++) {
-              let match = name.search(flat[j])
-              console.log(match)
-              //console.log("match", j, name, match);
-              if (match > -1) {
-                name = Math.floor(j / 3) + '_' + name
-                cm.push([name, canvas])
-                break
-              } else if (j === flat.length) {
-                cm.push([name, canvas])
+            if (crop === 6) {
+              cm.push([j + '_' + name, canvas])
+            } else {
+              // cubemap face from filename
+              name = file.name.toString().toLowerCase()
+              for (let k = 0; k < xyz.length; k++) {
+                let match = name.search(xyz[k])
+                if (match > -1) {
+                  let idx = Math.floor(vlay.mat.xyz.length * (k / xyz.length))
+                  let face = vlay.mat.xyz[idx][0]
+                  name = [idx, face, name].join('_')
+                  cm.push([name, canvas])
+                  break
+                } else if (k === xyz.length) {
+                  cm.push([name, canvas])
+                }
               }
             }
+            // image resize and crop
+
+            canvas.title = canvas.id = name
+            fragment.appendChild(canvas)
           }
 
           // await cubemap, sort, and proceed
@@ -194,14 +202,34 @@ const vlay = {
       }
 
       let canvas = document.createElement('canvas')
+      let ctx = canvas.getContext('2d')
       canvas.width = width
       canvas.height = height
-      let ctx = canvas.getContext('2d')
+
       if (!crop) {
         ctx.drawImage(img, 0, 0, width, height)
       } else {
+        if (crop.z) {
+          // orient boxmap
+          let rotate = document.createElement('canvas')
+          let ctx2 = rotate.getContext('2d')
+          rotate.width = img.height
+          rotate.height = img.width
+          // rotate canvas
+          let x = rotate.width / 2
+          let y = rotate.height / 2
+          ctx2.translate(x, y)
+          ctx2.rotate(crop.z)
+          ctx2.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height)
+          ctx2.rotate(-crop.z)
+          ctx2.translate(-x, -y)
+
+          img = rotate
+        }
+
         // assume aspect 1.33
         let face = img.width / 4
+
         ctx.drawImage(img, img.width * crop.x, img.height * crop.y, face, face, 0, 0, width, height)
       }
 
@@ -426,7 +454,7 @@ const vlay = {
     }
 
     // classification
-    console.log('contour', fit.contour)
+    //console.log('contour', fit.contour)
     for (let i = 0; i < fit.contour.length; i++) {
       let defects = fit.contour[i]
 
@@ -527,7 +555,7 @@ const vlay = {
           //buf.index = null
 
           // metaballs or marching cube
-          hull = c.depth[i] / c.depth[i - 1] < 2.5
+          hull = c.depth[i] / c.depth[i - 1] < 0.75
         } else {
           // connected
           const curve = new THREE.CatmullRomCurve3(c.point)
@@ -626,8 +654,8 @@ const vlay = {
       }
     }
 
-    console.log('fit', fit)
-    let fitline = new THREE.PlaneBufferGeometry(0, 0)
+    console.log('segs', fit)
+    let fitline = new THREE.PlaneGeometry(0, 0)
     let feats = ['neg', 'pos']
     feats.forEach(function (label) {
       // cavities buffer geometry to mesh
