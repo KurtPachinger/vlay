@@ -1,19 +1,26 @@
 {
-  "name": "texel-gpr-r3f",
-  "version": "1.0.0",
-  "description": "progressive displacement map",
-  "keywords": [],
+  "name": "vlay",
+  "version": "0.1.0",
+  "description": "voxel displacement map",
+  "keywords": [
+    "voxel",
+    "displace",
+    "boxmap",
+    "gpr",
+    "graph cut",
+    "point cloud"
+  ],
   "main": "src/index.js",
   "dependencies": {
     "@react-three/csg": "1.1.3",
-    "@react-three/drei": "9.25.3",
-    "@react-three/fiber": "8.6.2",
+    "@react-three/drei": "9.28.3",
+    "@react-three/fiber": "8.7.2",
     "@types/three": "0.144.0",
     "manipulator3d": "0.0.8",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-scripts": "5.0.1",
-    "three": "0.143.0"
+    "three": "0.144.0"
   },
   "devDependencies": {},
   "scripts": {
