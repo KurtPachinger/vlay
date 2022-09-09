@@ -20,7 +20,7 @@ export default function App(props) {
       <pointLight name="mid" intensity={2} position={[0, R / 4, 0]} castShadow />
       <pointLight name="low" intensity={1} position={[0, -R, -R * 2]} />
       <gridHelper args={[R * 2, 4]} position={0} />
-      <axesHelper args={[R / 2]} />
+      <axesHelper args={[R]} />
       <group name="out" ref={vlay.v.out}>
         <mesh name={'CSG'} castShadow>
           <CSG />
