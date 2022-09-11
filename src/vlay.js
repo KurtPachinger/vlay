@@ -7,7 +7,7 @@ const R = 10
 const vlay = {
   v: {
     R: R,
-    opt: { iter: 1, seed: 0.5, view: 0 },
+    opt: { iter: 5, seed: 0.7, view: 2 },
     csg: {
       /* geo, neg, pos */
     },
@@ -25,21 +25,18 @@ const vlay = {
     }),
     neg: new THREE.MeshPhongMaterial({
       name: 'neg',
-      specular: 0x8080c0,
-      vertexColors: true,
-      //flatShading: true,
-      transparent: true,
-      shininess: 15,
-      opacity: 0.9,
-      side: THREE.DoubleSide,
-      shadowSide: THREE.FrontSide
+      //side: THREE.BackSide,
+      color: 0xc04040,
+      specular: 0x202040,
+      shininess: 20
     }),
     pos: new THREE.MeshPhongMaterial({
       name: 'pos',
-      //color: 0x802020,
-      specular: 0x804040,
-      vertexColors: true,
-      shininess: 2
+      //side: THREE.FrontSide,
+      color: 0x101040,
+      specular: 0x201010,
+      flatShading: true,
+      shininess: 5
     }),
     xyz: [
       ['px', 'posx', 'right', '.50,.33'],
@@ -328,8 +325,8 @@ const vlay = {
       // *** to-do: memoize & reset position from userData ***
       geo.computeBoundingSphere()
       if (!geo.getAttribute('color')) {
-        let pos = geo.getAttribute('position')
-        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
+        //let pos = geo.getAttribute('position')
+        //geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       }
       opt.geo = geo
     }
@@ -366,20 +363,19 @@ const vlay = {
     }
 
     // raycast at vertices (for elevation, color)
-    const col = opt.geo.getAttribute('color')
     const pos = opt.geo.getAttribute('position')
     const ctr = opt.geo.boundingSphere.center
 
     // defects from boxmap (for surface features)
     let contour = opt.group.userData.contour
 
+    let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3(), set: false }
     for (let i = 0; i < pos.count; i++) {
+      // raycast
       const dir = new THREE.Vector3()
       const v_rays = new THREE.Raycaster()
       const v_disp = new THREE.Vector3()
       v_disp.fromBufferAttribute(pos, i)
-      const jitter = 1.001
-      v_disp.multiply(new THREE.Vector3(jitter, jitter, jitter))
       v_rays.set(ctr, dir.subVectors(v_disp, ctr).normalize())
 
       const intersects = v_rays.intersectObject(target, false)
@@ -393,37 +389,43 @@ const vlay = {
         let ctx = blur.getContext('2d')
         let rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
 
-        // vertex color
-        col.setXYZ(i, rgba[0] / 255, rgba[1] / 255, rgba[2] / 255)
-
         // sample strength ( grey is 1 )
         let d = (rgba[0] + rgba[1] + rgba[2] + rgba[3]) / 4 / 127
 
         // displace elevation
-        //v_disp.multiplyScalar(0.5 + d / 2)
-        //v_disp.lerp(intersect.point, 0.5)
-        v_disp.multiplyScalar(1.01)
-        //v_disp.lerp(intersect.point, 0)
+        v_disp.multiplyScalar(0.5 + d / 2)
+        v_disp.lerp(intersect.point, 0.5)
         pos.setXYZ(i, v_disp.x, v_disp.y, v_disp.z)
-        // mantle (crust, core)
-        // BVH-CSG cavities, extreme peak/valley
-        let face = vlay.util.num(intersect.faceIndex, { fix: 0, pre: 'f' })
-        let dist = vlay.util.num(d)
-        let iter = 'iter_' + opt.i
-        let xyz = [vlay.util.num(v_disp.x), vlay.util.num(v_disp.y), vlay.util.num(v_disp.z)].join(',')
-        // output meta
-        let defect = [dist, xyz, face, iter].join('|')
 
-        // defect tolerance, local sample
-        // ...not relative to layer(s) global distance
-        if (contour[face] === undefined) {
-          contour[face] = []
+        if (i % 9 === 0) {
+          m.tri.a.fromBufferAttribute(pos, i - 9)
+          m.tri.b.fromBufferAttribute(pos, i - 6)
+          m.tri.c.fromBufferAttribute(pos, i - 3)
+          m.tri.getMidpoint(m.mid)
+          moment()
         }
 
-        if (dist > 0.8) {
-          contour[face].push(defect + '|pos')
-        } else if (dist < 0.5) {
-          contour[face].push(defect + '|neg')
+        function moment() {
+          // mantle (crust, core)
+          // BVH-CSG cavities, extreme peak/valley
+          let face = vlay.util.num(intersect.faceIndex, { fix: 0, pre: 'f' })
+          let dist = vlay.util.num(d)
+          let iter = 'iter_' + opt.i
+          let xyz = [vlay.util.num(m.mid.x), vlay.util.num(m.mid.y), vlay.util.num(m.mid.z)].join(',')
+          // output meta
+          let defect = [dist, xyz, face, iter].join('|')
+
+          // defect tolerance, local sample
+          // ...not relative to layer(s) global distance
+          if (contour[face] === undefined) {
+            contour[face] = []
+          }
+
+          if (dist > 0.8) {
+            contour[face].push(defect + '|pos')
+          } else if (dist < 0.5) {
+            contour[face].push(defect + '|neg')
+          }
         }
       }
     }
@@ -441,7 +443,7 @@ const vlay = {
       contour: []
     }
 
-    const maxSegs = 4
+    const maxSegs = 8
     Object.keys(group.userData.contour).forEach(function (face) {
       // de-dupe, minimum, sort distance
       let defects = [...new Set(group.userData.contour[face])]
@@ -532,8 +534,7 @@ const vlay = {
         if (c.label === 'neg') {
           if (system) {
             // tube (radial cave)
-            let extra = i === c.point.length - 1 ? 2 : 0.125
-            point.multiplyScalar(prc + extra)
+            point.multiplyScalar(0.5 + depth / vlay.v.R)
           } else {
             c.label = 'pos'
             // box (central cave)
@@ -544,7 +545,7 @@ const vlay = {
             // tube (surface crust)
           } else {
             // box (orbital cloud)
-            point.multiplyScalar(2 + depth / 10)
+            point.multiplyScalar(2 + depth / vlay.v.R)
           }
         }
 
@@ -561,45 +562,57 @@ const vlay = {
       let geo = []
 
       // OUTPUT mesh (CSG)
-      let unit = (0.5 + c.forms) * (vlay.v.R / 4)
       for (let i = 0; i < c.system; i++) {
         let buf
-        let hull = false
 
-        if (c.system > 1) {
-          // not connected
-          let pt = c.point[i]
+        // meta-balls
 
-          buf = new THREE.TetrahedronGeometry(unit, 1)
-          // noise
-          buf.rotateX(-i * 2)
-          buf.rotateZ(i * 3)
-          buf.translate(pt.x, pt.y, pt.z)
+        //hull = c.forms > 0.4
 
-          // metaballs or marching cube
-          hull = c.depth[i] / c.depth[i - 1] > 1.33
+        if (c.label === 'neg') {
+          for (let j = 0; j < c.point.length; j++) {
+            let hull = true
+            let unit = vlay.v.R / 4 / c.forms
+            buf = new THREE.TetrahedronGeometry(unit, 1)
+            let pt = c.point[i]
+            buf.translate(pt.x, pt.y, pt.z)
+            // output
+            align(geo, buf, hull, c.label)
+          }
         } else {
-          // connected
-          const curve = new THREE.CatmullRomCurve3(c.point)
-          const extrude = {
-            steps: 8,
-            bevelEnabled: false,
-            extrudePath: curve
+          let hull = c.depth[i] / c.depth[i - 1] > 1.33
+          let unit = (0.5 + c.forms) * (vlay.v.R / 4)
+          if (c.system > 1) {
+            // not connected
+            buf = new THREE.TetrahedronGeometry(unit, 1)
+            let pt = c.point[i]
+            // params
+            buf.translate(pt.x, pt.y, pt.z)
+            buf.rotateX(-i * 2)
+            buf.rotateZ(i * 3)
+            // meta-balls
+          } else {
+            // connected
+            const curve = new THREE.CatmullRomCurve3(c.point)
+            // params
+            const extrude = {
+              steps: 8,
+              bevelEnabled: false,
+              extrudePath: curve
+            }
+            const pts = [],
+              cnt = 5
+            const l = vlay.v.R / 16
+            for (let i = 0; i < cnt; i++) {
+              const a = ((2 * i) / cnt) * Math.PI
+              pts.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
+            }
+            const ellipsoid = new THREE.Shape(pts)
+            buf = new THREE.ExtrudeGeometry(ellipsoid, extrude)
           }
-          // params
-          const pts = [],
-            cnt = 5
-          const l = vlay.v.R / 16
-          for (let i = 0; i < cnt; i++) {
-            const a = ((2 * i) / cnt) * Math.PI
-            pts.push(new THREE.Vector2(Math.cos(a) * l, Math.sin(a) * l))
-          }
-          const ellipsoid = new THREE.Shape(pts)
-          buf = new THREE.ExtrudeGeometry(ellipsoid, extrude)
-          // ...maybe SimplifyModifier on turned edges
-          hull = c.forms > 0.4
+          // output
+          align(geo, buf, hull, c.label)
         }
-        align(geo, buf, hull, c.label)
       }
 
       // merge geometries with all previous
