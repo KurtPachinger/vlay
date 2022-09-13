@@ -11,17 +11,17 @@ details {
 $unit: 0.5rem;
 $icon: 2.5em;
 
-canvas {
-  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIElEQVQYV2Nk+M/QwMDI0MAABYxgGkkQIoAkiBCACgIABm4HhEEa4PgAAAAASUVORK5CYII=");
-  background-size: 3px 3px;
-  image-rendering: pixelated;
-}
 
+#root{background:#000;}
 details {
   position: absolute;
   overflow: visible;
   padding: $unit;
   z-index: 1;
+  summary{
+    color: #fff;
+    background-color:rgba(32,32,32,0.5)
+  }
   
   #genmap, #boxmap{
     position: relative;
@@ -29,6 +29,11 @@ details {
     width: 50%;
     float: left;
     left: $icon;
+  }
+  canvas {
+    //background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIElEQVQYV2Nk+M/QwMDI0MAABYxgGkkQIoAkiBCACgIABm4HhEEa4PgAAAAASUVORK5CYII=");
+    background-size: 3px 3px;
+    image-rendering: pixelated;
   }
   canvas,
   img {
