@@ -3,11 +3,10 @@ import * as THREE from 'three'
 //threejs.org/examples/?q=modifi#webgl_modifier_subdivision
 //threejs.org/examples/?q=simp#webgl_modifier_simplifier
 //three/examples/jsm/materials/MeshGouraudMaterial.js
-import { useRef, useEffect, useState, useMemo } from 'react'
+import { useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, MeshReflectorMaterial, AdaptiveDpr } from '@react-three/drei'
-import { Brush, Subtraction, Addition, Intersection } from '@react-three/csg'
-import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { Brush, Subtraction } from '@react-three/csg'
 
 export default function App(props) {
   // output, positive defects
@@ -16,28 +15,29 @@ export default function App(props) {
   const R = vlay.v.R * 4
   return (
     <Canvas frameloop="demand" performance={{ min: 0.1 }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
+      <fog attach="fog" args={['black', 0, 300]} />
       <OrbitControls makeDefault />
-      <pointLight name="top" intensity={4} position={[0, R, R * 2]} castShadow />
-      <pointLight name="mid" intensity={2} position={[0, R / 4, 0]} castShadow />
-      <pointLight name="low" intensity={1} position={[0, -R, -R * 2]} />
+      <pointLight name="top" intensity={6} position={[0, R, R * 2]} castShadow />
+      <pointLight name="mid" intensity={3} position={[0, R / 4, 0]} castShadow />
+      <directionalLight name="low" intensity={2} position={[0, 0, -1]} />
       <gridHelper args={[R * 2, 4]} position={0} />
       <axesHelper args={[R]} />
       <group name="out" ref={vlay.v.out}>
-        <mesh material={vlay.mat.pos} name={'CSG'} castShadow>
+        <mesh name={'CSG'} castShadow material={vlay.mat.pos}>
           <CSG />
         </mesh>
       </group>
       <mesh name="mirror" rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
         <planeGeometry args={[R * 2, R * 2]} />
         <MeshReflectorMaterial
-          blur={[256, 128]}
-          resolution={1024}
-          mixBlur={1}
-          mixStrength={30}
-          roughness={1}
-          depthScale={0.3}
+          blur={[512, 128]}
+          resolution={512}
+          mixBlur={1.5}
+          mixStrength={50}
+          roughness={0.5}
+          depthScale={0.25}
           color="#202020"
-          metalness={0.6}
+          metalness={0.75}
         />
       </mesh>
       <AdaptiveDpr pixelated />
@@ -68,7 +68,7 @@ function CSG(props) {
 
   let neg = new THREE.PlaneGeometry(0, 0)
   let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 3)
-  geo = mergeVertices(geo)
+  //geo = mergeVertices(geo)
   geo.userData.pos = geo.attributes.position.clone()
 
   return (
