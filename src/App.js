@@ -7,6 +7,7 @@ import { useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, MeshReflectorMaterial, AdaptiveDpr } from '@react-three/drei'
 import { Brush, Subtraction } from '@react-three/csg'
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 export default function App(props) {
   // output, positive defects
@@ -15,7 +16,7 @@ export default function App(props) {
   const R = vlay.v.R * 4
   return (
     <Canvas frameloop="demand" performance={{ min: 0.1 }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
-      <fog attach="fog" args={['black', 0, 200]} />
+      <fog attach="fog" args={['black', 0, 300]} />
       <OrbitControls makeDefault />
       <pointLight name="top" intensity={6} position={[0, R, R * 2]} castShadow />
       <pointLight name="mid" intensity={3} position={[0, R / 4, 0]} castShadow />
@@ -68,7 +69,7 @@ function CSG(props) {
 
   let neg = new THREE.PlaneGeometry(0, 0)
   let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 3)
-  //geo = mergeVertices(geo)
+  geo = mergeVertices(geo)
   geo.userData.pos = geo.attributes.position.clone()
 
   return (
