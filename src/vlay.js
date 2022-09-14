@@ -416,7 +416,7 @@ const vlay = {
         let blur = blurs[intersect.face.materialIndex]
         let ctx = blur.getContext('2d')
         let rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
-        // rgba strength ( grey is 1 )
+        // rgba strength
         m.d = (rgba[0] + rgba[1] + rgba[2] + rgba[3]) / 3 / 127
         if (m.d === 0) {
           // transparent pixel?
@@ -472,7 +472,7 @@ const vlay = {
       contour: []
     }
 
-    const maxSegs = 16
+    const maxSegs = 12
     Object.keys(group.userData.contour).forEach(function (face) {
       // de-dupe, minimum, sort distance
       let defects = [...new Set(group.userData.contour[face])]
@@ -539,7 +539,7 @@ const vlay = {
       let weight = c.label / defects.length
       weight = weight / fit.cluster.c || 0
       c.forms = vlay.util.num(depth + weight, { n: true })
-      c.label = c.forms > 0.9 ? 'pos' : 'neg'
+      c.label = c.forms > 1.125 ? 'pos' : 'neg'
 
       // curve defects
       //console.log('c', c)
@@ -557,23 +557,24 @@ const vlay = {
       // form-specific transforms
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
-        let prc = (i + 1) / c.point.length
+        let range = (i + 1) / c.point.length
+        let scale = c.forms / c.depth[i] / c.depth.length / 2
 
         if (c.label === 'neg') {
           if (system) {
             // tube (radial cave)
-            point.multiplyScalar(prc)
+            point.multiplyScalar(range)
           } else {
             // box (central cave)
-            point.multiplyScalar(prc * 0.5)
+            point.multiplyScalar(range * 0.5)
           }
         } else if (c.label === 'pos') {
           if (system) {
             // tube (surface crust)
-            point.multiplyScalar(prc)
+            point.multiplyScalar(range)
           } else {
             // box (orbital cloud)
-            point.multiplyScalar(prc + 0.5)
+            point.multiplyScalar(scale + 0.5)
           }
         }
       }
@@ -650,7 +651,13 @@ const vlay = {
     }
 
     function align(geo, buf, c) {
-      let hull = c.idx === 0 ? false : c.depth[c.idx - 1] / c.depth[c.idx] < 1
+      let hull = false
+      if (c.idx >= 1) {
+        // c.system > 1
+        // c.forms > 1.5
+        let tolerance = c.label === 'neg' ? c.system : c.forms / 2
+        hull = c.depth[c.idx - 1] / c.depth[c.idx] < tolerance
+      }
 
       if (hull) {
         // convex hull
