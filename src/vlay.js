@@ -7,7 +7,7 @@ const R = 10
 const vlay = {
   v: {
     R: R,
-    opt: { seed: 0.5, iter: 5, view: 1 },
+    opt: { uid: true, seed: 0.5, iter: 5, view: 1 },
     csg: {
       /* geo, neg, pos */
     },
@@ -39,6 +39,13 @@ const vlay = {
       flatShading: true,
       vertexColors: true,
       shininess: 10
+    }),
+    env: new THREE.MeshBasicMaterial({
+      name: 'env',
+      color: 0xc01080,
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0.125
     }),
     xyz: [
       ['px', 'posx', 'right', '.50,.33'],
@@ -128,7 +135,7 @@ const vlay = {
     remap: function (files) {
       //console.log(files);
       if (files.length !== 1 && files.length % 6 !== 0) {
-        return 'artboard...?'
+        return 'artboard(s)...?'
       }
 
       vlay.util.reset('boxmap')
@@ -192,7 +199,8 @@ const vlay = {
           if (cm.length >= files.length) {
             document.getElementById('boxmap').appendChild(fragment)
             cm.sort()
-            vlay.gcut({ box: cm, id: 'box' })
+            vlay.v.opt.uid = false
+            vlay.gcut({ img: cm, uid: 'img' })
           }
 
           img = null
@@ -259,6 +267,8 @@ const vlay = {
     },
     gui: function () {
       const gui = new GUI()
+
+      gui.add(vlay.v.opt, 'uid')
       gui
         .add(vlay.v.opt, 'seed', 0, 1)
         .step(0.05)
@@ -272,11 +282,11 @@ const vlay = {
           vlay.gcut({ i: n })
         })
       let view = gui
-        .add(vlay.v.opt, 'view', 0, 3)
+        .add(vlay.v.opt, 'view', 0, 4)
         .step(1)
         .listen()
         .onChange(function (n) {
-          let onion = ['box', 'neg', 'CSG', 'pos']
+          let onion = ['box', 'neg', 'CSG', 'pos', 'env']
           //let onion = ['box', 'pos', 'CSG', 'neg']
           vlay.v.out.current.children.forEach(function (obj) {
             let meshes = obj.type === 'Group' ? obj.children : [obj]
@@ -327,19 +337,23 @@ const vlay = {
       opt.init = true
       opt.i = opt.i || vlay.v.opt.iter
       opt.s = opt.s || vlay.v.opt.seed
-      opt.id = 'default'
-      //opt.id = [opt.id || 'noise', opt.s, opt.p].join('_')
+      opt.uid = opt.uid || (vlay.v.opt.uid ? 'rnd' : 'img')
+      //opt.uid = [opt.uid, opt.s, opt.p].join('_')
 
       // RESET
       opt.view = vlay.util.gui.save()
-      vlay.util.reset(vlay.v.out.current.getObjectByName(opt.id))
+      //vlay.util.reset(vlay.v.out.current.getObjectByName(opt.uid))
+      vlay.util.reset(vlay.v.out.current.getObjectByName('rnd'))
+      vlay.util.reset(vlay.v.out.current.getObjectByName('img'))
       // GROUP
       opt.group = new THREE.Group()
-      opt.group.name = opt.id
+      opt.group.name = opt.uid
       vlay.v.out.current.add(opt.group)
 
       // CUBEMAP
-      vlay.mat.map = vlay.matgen(opt.box || 0, opt)
+      if (opt.img || vlay.v.opt.uid) {
+        vlay.mat.map = vlay.matgen(opt.img || 0, opt)
+      }
       let box = new THREE.Mesh(vlay.mat.box, vlay.mat.map)
       box.name = 'box'
       box.renderOrder = 2
@@ -352,10 +366,8 @@ const vlay = {
       geo.attributes.position.copy(geo.userData.pos)
       geo.attributes.position.needsUpdate = true
       opt.geo = geo
-      if (!geo.getAttribute('color')) {
-        //let pos = geo.getAttribute('position')
-        //geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
-      }
+      // ENVIRONMENT
+      opt.env = geo.clone()
     }
 
     if (opt.i > 0) {
@@ -366,11 +378,16 @@ const vlay = {
     } else {
       // output
       opt.group = await vlay.segs(opt.group)
-
       vlay.util.gui.load(opt.view)
       // update r3f
       vlay.v.csg.geo.current.userData.update = true
       vlay.v.state.invalidate()
+
+      // ENVIRONMENT
+      let env = new THREE.Mesh(opt.env, vlay.mat.env)
+      env.scale.set(12, 12, 12)
+      env.name = 'env'
+      opt.group.add(env)
     }
   },
   morph: function (opt) {
@@ -395,13 +412,14 @@ const vlay = {
     // defects from boxmap (for surface features)
     let contour = opt.group.userData.contour
     // raycast at vertices (for elevation, color)
-    const pos = opt.geo.getAttribute('position')
+    const geo = opt.geo.getAttribute('position')
+    const env = opt.env.getAttribute('position')
     const ctr = opt.geo.boundingSphere.center
 
-    for (let i = 0; i < pos.count; i += 3) {
+    for (let i = 0; i < geo.count; i += 3) {
       // triangle moment
       let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3() }
-      m.tri.setFromAttributeAndIndices(pos, i, i + 1, i + 2)
+      m.tri.setFromAttributeAndIndices(geo, i, i + 1, i + 2)
       m.tri.getMidpoint(m.mid)
       // raycast boxmap
       const ray = new THREE.Raycaster()
@@ -425,10 +443,15 @@ const vlay = {
 
         Object.keys(m.tri).forEach(function (corner, idx) {
           let v3 = m.tri[corner]
+          // env
+          if (opt.i === vlay.v.opt.iter) {
+            let v = v3.clone()
+            v.multiplyScalar(m.d)
+            env.setXYZ(i + idx, v.x, v.y, v.z)
+          }
+          // geo
           v3.multiplyScalar(0.5 + m.d)
-
-          //v3.lerp(intersect.point, 0.5)
-          pos.setXYZ(i + idx, v3.x, v3.y, v3.z)
+          geo.setXYZ(i + idx, v3.x, v3.y, v3.z)
         })
 
         moment(m, intersect)
@@ -456,8 +479,6 @@ const vlay = {
         contour[face].push(defect + '|neg')
       }
     }
-
-    opt.geo.attributes.position.needsUpdate = true
 
     // cleanup
     vlay.util.reset(blurs)
@@ -745,7 +766,7 @@ const vlay = {
 
       for (let x = 0; x < m; x++) {
         for (let y = 0; y < m; y++) {
-          ctx.fillStyle = '#' + vlay.util.gen(opt.id)
+          ctx.fillStyle = '#' + vlay.util.gen(opt.uid)
           ctx.fillRect(x, y, 1, 1)
         }
       }
