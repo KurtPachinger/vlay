@@ -15,7 +15,7 @@ export default function App(props) {
   const R = vlay.v.R * 4
   return (
     <Canvas frameloop="demand" performance={{ min: 0.1 }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
-      <fog attach="fog" args={['black', 0, 300]} />
+      <fog attach="fog" args={['black', 0, 200]} />
       <OrbitControls makeDefault />
       <pointLight name="top" intensity={6} position={[0, R, R * 2]} castShadow />
       <pointLight name="mid" intensity={3} position={[0, R / 4, 0]} castShadow />
