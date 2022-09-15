@@ -42,10 +42,10 @@ const vlay = {
     }),
     env: new THREE.MeshBasicMaterial({
       name: 'env',
-      color: 0xc01080,
+      color: 0x4010c0,
       side: THREE.BackSide,
       transparent: true,
-      opacity: 0.125
+      opacity: 0.25
     }),
     xyz: [
       ['px', 'posx', 'right', '.50,.33'],
@@ -68,7 +68,7 @@ const vlay = {
     for (let i = 0; i < pos.count; i++) {
       let vtx = new THREE.Vector3()
       vtx.fromBufferAttribute(pos, i)
-      let mult = (vlay.v.R * 2) / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
+      let mult = (vlay.v.R * 4) / Math.sqrt(vtx.x * vtx.x + vtx.y * vtx.y + vtx.z * vtx.z)
       vtx.multiplyScalar(mult)
       pos.setXYZ(i, vtx.x, vtx.y, vtx.z)
     }
@@ -133,8 +133,8 @@ const vlay = {
       }
     },
     remap: function (files) {
-      //console.log(files);
-      if (files.length !== 1 && files.length % 6 !== 0) {
+      //console.log(files)
+      if (files.length === 0 || (files.length !== 1 && files.length % 6 !== 0)) {
         return 'artboard(s)...?'
       }
 
@@ -268,7 +268,7 @@ const vlay = {
     gui: function () {
       const gui = new GUI()
 
-      gui.add(vlay.v.opt, 'uid')
+      gui.add(vlay.v.opt, 'uid').name('use seed').listen()
       gui
         .add(vlay.v.opt, 'seed', 0, 1)
         .step(0.05)
@@ -361,6 +361,7 @@ const vlay = {
 
       // MANTLE
       opt.group.userData.contour = {}
+      opt.vertice = {}
 
       let geo = vlay.v.csg.geo.current.geometry
       geo.attributes.position.copy(geo.userData.pos)
@@ -376,16 +377,42 @@ const vlay = {
       opt.i--
       vlay.gcut(opt)
     } else {
+      // transformers
+      const pos = opt.env.getAttribute('position')
+      for (let i = 0; i < pos.count; i += 3) {
+        // triangle moment
+        let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3() }
+        m.tri.setFromAttributeAndIndices(pos, i, i + 1, i + 2)
+        m.tri.getMidpoint(m.mid)
+        Object.keys(m.tri).forEach(function (corner, idx) {
+          let v3 = m.tri[corner]
+          // lookup
+          let xyz = v3.toArray().join('_')
+          let avg = opt.vertice[xyz] || [1]
+          // output accumulate
+          avg = avg.reduce((a, b) => a + b)
+          avg = avg / opt.vertice[xyz].length
+          v3.multiplyScalar(avg)
+          v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
+          // ouput to dummy clone for CSG
+          pos.setXYZ(i + idx, v3.x, v3.y, v3.z)
+        })
+      }
+
       // output
       opt.group = await vlay.segs(opt.group)
       vlay.util.gui.load(opt.view)
       // update r3f
+      opt.geo.needsUpdate = true
+      opt.geo.attributes.position.needsUpdate = true
+      //
+      vlay.v.csg.geo.current.geometry = opt.geo
       vlay.v.csg.geo.current.userData.update = true
       vlay.v.state.invalidate()
 
       // ENVIRONMENT
-      let env = new THREE.Mesh(opt.env, vlay.mat.env)
-      env.scale.set(12, 12, 12)
+      let env = new THREE.Mesh(opt.env, vlay.mat.pos)
+      env.scale.set(2, 2, 2)
       env.name = 'env'
       opt.group.add(env)
     }
@@ -395,13 +422,13 @@ const vlay = {
 
     // cubemap PYR attenuate/convolute
     let blurs = []
-    let k = vlay.v.opt.iter - opt.i + 2
+    let k = 1 - (opt.i - 1) / vlay.v.opt.iter
     let target = opt.group.getObjectByName('box')
     for (let i = 0; i < target.material.length; i++) {
       let material = target.material[i].map.source.data
       let blur = document.createElement('canvas')
       let ctx = blur.getContext('2d')
-      blur.width = blur.height = k
+      blur.width = blur.height = Math.round((material.width * k) / 2)
       ctx.drawImage(material, 0, 0, blur.width, blur.height)
       blurs.push(blur)
     }
@@ -411,9 +438,8 @@ const vlay = {
 
     // defects from boxmap (for surface features)
     let contour = opt.group.userData.contour
-    // raycast at vertices (for elevation, color)
+    // raycast (for elevation, color)
     const geo = opt.geo.getAttribute('position')
-    const env = opt.env.getAttribute('position')
     const ctr = opt.geo.boundingSphere.center
 
     for (let i = 0; i < geo.count; i += 3) {
@@ -425,7 +451,7 @@ const vlay = {
       const ray = new THREE.Raycaster()
       const dir = new THREE.Vector3()
       ray.set(ctr, dir.subVectors(m.mid, ctr).normalize())
-
+      // accumulate transformer
       const intersects = ray.intersectObject(target, false)
       if (intersects.length) {
         let intersect = intersects[0]
@@ -434,25 +460,34 @@ const vlay = {
         let blur = blurs[intersect.face.materialIndex]
         let ctx = blur.getContext('2d')
         let rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
-        // rgba strength
-        m.d = (rgba[0] + rgba[1] + rgba[2] + rgba[3]) / 3 / 127
+        // rgba strength (grey is 1)
+        m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127
         if (m.d === 0) {
           // transparent pixel?
-          continue
+          //continue
         }
+        m.d += 0.5
 
-        Object.keys(m.tri).forEach(function (corner, idx) {
-          let v3 = m.tri[corner]
-          // env
-          if (opt.i === vlay.v.opt.iter) {
-            let v = v3.clone()
-            v.multiplyScalar(m.d)
-            env.setXYZ(i + idx, v.x, v.y, v.z)
-          }
-          // geo
-          v3.multiplyScalar(0.5 + m.d)
-          geo.setXYZ(i + idx, v3.x, v3.y, v3.z)
-        })
+        // accumulate transformers
+        transform(false)
+        function transform(d) {
+          Object.keys(m.tri).forEach(function (corner, idx) {
+            let v3 = m.tri[corner]
+            // lookup
+            let xyz = v3.toArray().join('_')
+            let prev = opt.vertice[xyz]
+            if (!prev) {
+              opt.vertice[xyz] = []
+            }
+            // unique vertex or triangle moment
+            if (!prev || d) {
+              opt.vertice[xyz].push(d || m.d)
+            } else {
+              transform(m.d)
+              return
+            }
+          })
+        }
 
         moment(m, intersect)
       }
@@ -587,7 +622,7 @@ const vlay = {
             point.multiplyScalar(range)
           } else {
             // box (central cave)
-            point.multiplyScalar(range * 0.5)
+            //point.multiplyScalar(range * 0.5)
           }
         } else if (c.label === 'pos') {
           if (system) {
@@ -595,7 +630,7 @@ const vlay = {
             point.multiplyScalar(range)
           } else {
             // box (orbital cloud)
-            point.multiplyScalar(scale + 0.5)
+            //point.multiplyScalar(scale + 0.5)
           }
         }
       }
@@ -761,7 +796,7 @@ const vlay = {
   },
   matgen: function (num, opt) {
     function noise(canvas) {
-      let m = (canvas.width = canvas.height = 8)
+      let m = (canvas.width = canvas.height = 32)
       let ctx = canvas.getContext('2d')
 
       for (let x = 0; x < m; x++) {
