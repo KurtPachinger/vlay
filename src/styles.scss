@@ -9,7 +9,7 @@ details {
   overflow-y: auto;
 }
 $unit: 0.5rem;
-$icon: 2.5em;
+$icon: 3em;
 
 
 #root{background:#000;}
@@ -34,15 +34,17 @@ details {
     //background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIElEQVQYV2Nk+M/QwMDI0MAABYxgGkkQIoAkiBCACgIABm4HhEEa4PgAAAAASUVORK5CYII=");
     background-size: 3px 3px;
     image-rendering: pixelated;
+    cursor:pointer;
   }
   canvas,
   img {
+    box-sizing: border-box;
     width: $icon;
     height: $icon;
     margin: 0 $unit $unit 0;
     padding: $unit/2;
     vertical-align: middle;
-    background-color: rgba(128, 128, 128, 0.25);
+    background-color: rgba(128, 128, 128, 0.5);
 
     &:hover {
       transform: scale(1.5);
@@ -59,27 +61,33 @@ details {
     &[id*="_py"]{
       top: -$icon;
       border-bottom: 0;
+      border-color:peru steelblue 
     };
     &[id*="_ny"]{
       top: $icon;
       border-top: 0;
+      border-color:peru steelblue 
     };
     &[id*="_px"]{
       left: $icon;
       border-left: 0;
       border-right: 0;
+      border-color:steelblue
     };
     &[id*="_nx"]{
       left: -$icon;
       border-right: 0;
+      border-color:steelblue greenyellow
     };
     &[id*="_pz"]{
       left: 0;
       border: 0;
+      
     };
     &[id*="_nz"]{
       left: (2*$icon);
       border-left: 0;
+      border-color:peru greenyellow
     };
 
   }
