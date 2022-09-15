@@ -16,10 +16,19 @@ export default function App(props) {
   const R = vlay.v.R * 4
   return (
     <Canvas frameloop="demand" performance={{ min: 0.1 }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
-      <fog attach="fog" args={['black', 0, 300]} />
+      <fog attach="fog" args={['black', 0, 400]} />
       <OrbitControls makeDefault />
-      <pointLight name="top" intensity={6} position={[0, R, R * 2]} castShadow />
-      <pointLight name="mid" intensity={3} position={[0, R / 4, 0]} castShadow />
+      <pointLight
+        name="top"
+        intensity={6}
+        distance={R * 8}
+        decay={2}
+        position={[0, R, R * 2]}
+        castShadow
+        shadow-mapSize-height={2048}
+        shadow-mapSize-width={2048}
+      />
+      <pointLight name="mid" intensity={3} distance={R * 2} decay={2} position={[0, R / 4, 0]} castShadow />
       <directionalLight name="low" intensity={2} position={[0, 0, -1]} />
       <gridHelper args={[R * 2, 4]} position={0} />
       <axesHelper args={[R]} />
@@ -32,7 +41,7 @@ export default function App(props) {
         <planeGeometry args={[R * 2, R * 2]} />
         <MeshReflectorMaterial
           blur={[512, 128]}
-          resolution={512}
+          resolution={1024}
           mixBlur={1.5}
           mixStrength={50}
           roughness={0.5}
@@ -46,7 +55,7 @@ export default function App(props) {
   )
 }
 
-function CSG(props) {
+function CSG() {
   //codesandbox.io/s/busy-swirles-eckvc1
   //docs.pmnd.rs/react-three-fiber/api/events
 
@@ -54,7 +63,7 @@ function CSG(props) {
   vlay.v.csg.neg = useRef()
   vlay.v.csg.geo = useRef()
 
-  //vlay.v.csg.pos = useRef()
+  vlay.v.csg.pos = useRef()
 
   useFrame((state) => {
     const geom = vlay.v.csg.geo.current
@@ -74,9 +83,9 @@ function CSG(props) {
 
   return (
     <Subtraction>
-      <Brush a ref={vlay.v.csg.geo} geometry={geo} {...props} />
+      <Brush a ref={vlay.v.csg.geo} geometry={geo} />
       <Brush a>
-        <Brush b ref={vlay.v.csg.neg} geometry={neg} material={vlay.v.csg.neg} />
+        <Brush b ref={vlay.v.csg.neg} geometry={neg} material={vlay.mat.neg} />
         <icosahedronGeometry b args={[vlay.v.R, 2]} />
       </Brush>
     </Subtraction>
