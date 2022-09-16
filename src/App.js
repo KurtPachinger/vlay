@@ -77,9 +77,11 @@ function CSG() {
   })
 
   let neg = new THREE.PlaneGeometry(0, 0)
-  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 3)
+  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 4)
   geo = mergeVertices(geo)
   geo.userData.pos = geo.attributes.position.clone()
+  // boxmap max resolution
+  vlay.mat.MAX = Math.min(geo.index.count / (6 / 3), 1024)
 
   return (
     <Subtraction>
