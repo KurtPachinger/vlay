@@ -50,7 +50,18 @@ details {
       transform: scale(1.5);
       background-color: rgba(255, 255, 255, 0.5);
       z-index: 1;
+      animation: kNN 8s linear 2s 1 forwards;
     }
+    @keyframes kNN {
+      10%, 90% {
+        filter: blur(($icon*.05)) contrast(2) ;
+        padding: 0;
+        background-color: #808080;
+        border-color: transparent;
+      }
+    }
+    
+
     &:last-child {
       margin-right: 0;
     }
