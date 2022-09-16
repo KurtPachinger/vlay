@@ -14,6 +14,7 @@ const vlay = {
     uid: {}
   },
   mat: {
+    MAX: 128,
     box: new THREE.BoxGeometry(R, R, R, 2, 2, 2),
     img: new THREE.MeshBasicMaterial({
       name: 'img',
@@ -59,7 +60,7 @@ const vlay = {
   init: function (state) {
     // r3f canvas created state
     vlay.v.state = state
-    vlay.util.gui = vlay.util.gui()
+    vlay.util.gui()
     vlay.util.minimap()
 
     // BOXMAP
@@ -209,25 +210,25 @@ const vlay = {
       }
     },
     refit: function (img, crop) {
-      let MAX_ = vlay.v.opt.iter * 128
+      const MAX = vlay.mat.MAX
       let width = img.width
       let height = img.height
 
       // square
       if (crop) {
-        width = height = MAX_
+        width = height = MAX
       }
 
       // fit dimensions
       if (width > height) {
-        if (width > MAX_) {
-          height = height * (MAX_ / width)
-          width = MAX_
+        if (width > MAX) {
+          height = height * (MAX / width)
+          width = MAX
         }
       } else {
-        if (height > MAX_) {
-          width = width * (MAX_ / height)
-          height = MAX_
+        if (height > MAX) {
+          width = width * (MAX / height)
+          height = MAX
         }
       }
 
@@ -281,7 +282,7 @@ const vlay = {
         .onFinishChange(function (n) {
           vlay.gcut({ i: n })
         })
-      let view = gui
+      let preset = gui
         .add(vlay.v.opt, 'view', 0, 4)
         .step(1)
         .listen()
@@ -299,7 +300,7 @@ const vlay = {
           vlay.v.state.invalidate()
         })
 
-      return view
+      vlay.v.opt._preset = preset
     },
     minimap: function () {
       document.querySelector('details').addEventListener('click', function (e) {
@@ -341,7 +342,6 @@ const vlay = {
       //opt.uid = [opt.uid, opt.s, opt.p].join('_')
 
       // RESET
-      opt.view = vlay.util.gui.save()
       //vlay.util.reset(vlay.v.out.current.getObjectByName(opt.uid))
       vlay.util.reset(vlay.v.out.current.getObjectByName('rnd'))
       vlay.util.reset(vlay.v.out.current.getObjectByName('img'))
@@ -361,7 +361,7 @@ const vlay = {
 
       // MANTLE
       opt.group.userData.contour = {}
-      opt.vertice = {}
+      opt.accumulate = {}
 
       let geo = vlay.v.csg.geo.current.geometry
       geo.attributes.position.copy(geo.userData.pos)
@@ -377,21 +377,29 @@ const vlay = {
       opt.i--
       vlay.gcut(opt)
     } else {
-      // transformers
+      console.log('accumulate', opt.accumulate)
       const pos = opt.env.getAttribute('position')
+      // accumulate: length ~= ( positions - 1x circumference )
       for (let i = 0; i < pos.count; i += 3) {
         // triangle moment
         let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3() }
         m.tri.setFromAttributeAndIndices(pos, i, i + 1, i + 2)
         m.tri.getMidpoint(m.mid)
+
         Object.keys(m.tri).forEach(function (corner, idx) {
           let v3 = m.tri[corner]
+
+          if (isNaN(v3.length())) {
+            // merged vertice (last)
+            return
+          }
+
           // lookup
           let xyz = v3.toArray().join('_')
-          let avg = opt.vertice[xyz] || [1]
-          // output accumulate
-          avg = avg.reduce((a, b) => a + b)
-          avg = avg / opt.vertice[xyz].length
+          xyz = opt.accumulate[xyz] || [1]
+          // transform accumulate
+          let avg = xyz.reduce((a, b) => a + b)
+          avg = avg / xyz.length
           v3.multiplyScalar(avg)
           v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
           // ouput to dummy clone for CSG
@@ -401,12 +409,8 @@ const vlay = {
 
       // output
       opt.group = await vlay.segs(opt.group)
-      vlay.util.gui.load(opt.view)
+      vlay.v.opt._preset.setValue(vlay.v.opt.view)
       // update r3f
-      opt.geo.needsUpdate = true
-      opt.geo.attributes.position.needsUpdate = true
-      //
-      vlay.v.csg.geo.current.geometry = opt.geo
       vlay.v.csg.geo.current.userData.update = true
       vlay.v.state.invalidate()
 
@@ -439,13 +443,13 @@ const vlay = {
     // defects from boxmap (for surface features)
     let contour = opt.group.userData.contour
     // raycast (for elevation, color)
-    const geo = opt.geo.getAttribute('position')
+    const pos = opt.geo.getAttribute('position')
     const ctr = opt.geo.boundingSphere.center
 
-    for (let i = 0; i < geo.count; i += 3) {
+    for (let i = 0; i < pos.count; i += 3) {
       // triangle moment
       let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3() }
-      m.tri.setFromAttributeAndIndices(geo, i, i + 1, i + 2)
+      m.tri.setFromAttributeAndIndices(pos, i, i + 1, i + 2)
       m.tri.getMidpoint(m.mid)
       // raycast boxmap
       const ray = new THREE.Raycaster()
@@ -461,30 +465,31 @@ const vlay = {
         let ctx = blur.getContext('2d')
         let rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
         // rgba strength (grey is 1)
-        m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127
-        if (m.d === 0) {
+        m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 255
+        if (rgba[3] === 0 || m.d === 0) {
           // transparent pixel?
           //continue
         }
-        m.d += 0.5
+        m.d += 1
 
         // accumulate transformers
-        transform(false)
-        function transform(d) {
+        accumulate(false)
+        function accumulate(d) {
           Object.keys(m.tri).forEach(function (corner, idx) {
             let v3 = m.tri[corner]
             // lookup
             let xyz = v3.toArray().join('_')
-            let prev = opt.vertice[xyz]
+            let prev = opt.accumulate[xyz]
             if (!prev) {
-              opt.vertice[xyz] = []
+              opt.accumulate[xyz] = []
             }
             // unique vertex or triangle moment
             if (!prev || d) {
-              opt.vertice[xyz].push(d || m.d)
+              // todo: use index as key?
+              opt.accumulate[xyz].push(d || m.d)
             } else {
-              transform(m.d)
-              return
+              accumulate(m.d)
+              //return
             }
           })
         }
@@ -796,13 +801,15 @@ const vlay = {
   },
   matgen: function (num, opt) {
     function noise(canvas) {
-      let m = (canvas.width = canvas.height = 32)
+      let m = (canvas.width = canvas.height = vlay.mat.MAX)
       let ctx = canvas.getContext('2d')
 
-      for (let x = 0; x < m; x++) {
-        for (let y = 0; y < m; y++) {
+      // kNN smooth in morph PYR: iter superpixel time/quality
+      const d = vlay.mat.MAX / 64
+      for (let x = 0; x < m; x += d) {
+        for (let y = 0; y < m; y += d) {
           ctx.fillStyle = '#' + vlay.util.gen(opt.uid)
-          ctx.fillRect(x, y, 1, 1)
+          ctx.fillRect(x, y, d, d)
         }
       }
 
