@@ -12,7 +12,7 @@ $unit: 0.5rem;
 $icon: 3em;
 
 
-#root{background:#000;}
+#root{background: #000;}
 details {
   position: absolute;
   overflow: visible;
@@ -20,7 +20,7 @@ details {
   z-index: 1;
   summary{
     color: #fff;
-    background-color:rgba(32,32,32,0.5)
+    background-color: rgba(32,32,32,0.5)
   }
   
   #genmap, #boxmap{
@@ -34,7 +34,7 @@ details {
     //background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIElEQVQYV2Nk+M/QwMDI0MAABYxgGkkQIoAkiBCACgIABm4HhEEa4PgAAAAASUVORK5CYII=");
     background-size: 3px 3px;
     image-rendering: pixelated;
-    cursor:pointer;
+    cursor: pointer;
   }
   canvas,
   img {
@@ -42,22 +42,21 @@ details {
     width: $icon;
     height: $icon;
     margin: 0 $unit $unit 0;
-    padding: $unit/2;
+    padding: $unit/4;
     vertical-align: middle;
     background-color: rgba(128, 128, 128, 0.5);
 
     &:hover {
+      background-color: #808080;
       transform: scale(1.5);
-      background-color: rgba(255, 255, 255, 0.5);
       z-index: 1;
       animation: kNN 8s linear 2s 1 forwards;
     }
     @keyframes kNN {
-      10%, 90% {
-        filter: blur(($icon*.05)) contrast(2) ;
-        padding: 0;
-        background-color: #808080;
+      33%, 66% {
         border-color: transparent;
+        padding: 0;
+        filter: blur(($icon*.05)) contrast(6) ;
       }
     }
     
@@ -72,23 +71,23 @@ details {
     &[id*="_py"]{
       top: -$icon;
       border-bottom: 0;
-      border-color:peru steelblue 
+      border-color: peru steelblue 
     };
     &[id*="_ny"]{
       top: $icon;
       border-top: 0;
-      border-color:peru steelblue 
+      border-color: peru steelblue 
     };
     &[id*="_px"]{
       left: $icon;
       border-left: 0;
       border-right: 0;
-      border-color:steelblue
+      border-color: steelblue
     };
     &[id*="_nx"]{
       left: -$icon;
       border-right: 0;
-      border-color:steelblue greenyellow
+      border-color: steelblue greenyellow
     };
     &[id*="_pz"]{
       left: 0;
@@ -98,7 +97,7 @@ details {
     &[id*="_nz"]{
       left: (2*$icon);
       border-left: 0;
-      border-color:peru greenyellow
+      border-color: peru greenyellow
     };
 
   }
