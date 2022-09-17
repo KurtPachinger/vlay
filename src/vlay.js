@@ -620,11 +620,11 @@ const vlay = {
 
     function profile(c) {
       // feature
-      let poi = c.forms > 4 || c.forms < 0.33
+      let poi = c.forms > 6 || c.forms < 0.33
       // process
       let dif = c.depth[0] / c.depth[c.depth.length - 1]
       // classify connected geo-morph system
-      let system = poi || dif > 4
+      let system = poi || dif > 3
 
       // form-specific transforms
       for (let i = 0; i < c.point.length; i++) {
@@ -813,7 +813,7 @@ const vlay = {
       let ctx = canvas.getContext('2d')
 
       // kNN smooth in morph PYR: iter superpixel time/quality
-      const d = vlay.mat.MAX / 64
+      const d = vlay.mat.MAX / 32
       for (let x = 0; x < m; x += d) {
         for (let y = 0; y < m; y += d) {
           ctx.fillStyle = '#' + vlay.util.gen(opt.uid)
