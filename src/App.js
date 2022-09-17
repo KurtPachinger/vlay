@@ -9,36 +9,40 @@ import { OrbitControls, MeshReflectorMaterial, AdaptiveDpr } from '@react-three/
 import { Brush, Subtraction } from '@react-three/csg'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
-export default function App(props) {
+export default function App() {
   // output, positive defects
   vlay.v.out = useRef()
 
-  const R = vlay.v.R * 4
+  const R = vlay.v.R * 8
   return (
     <Canvas frameloop="demand" performance={{ min: 0.1 }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
       <fog attach="fog" args={['black', 0, 400]} />
       <OrbitControls makeDefault />
       <pointLight
         name="top"
-        intensity={6}
-        distance={R * 8}
+        intensity={8}
+        distance={R * 4}
         decay={2}
-        position={[0, R, R * 2]}
+        position={[0, R, R]}
         castShadow
         shadow-mapSize-height={2048}
         shadow-mapSize-width={2048}
       />
-      <pointLight name="mid" intensity={3} distance={R * 2} decay={2} position={[0, R / 4, 0]} castShadow />
-      <directionalLight name="low" intensity={2} position={[0, 0, -1]} />
-      <gridHelper args={[R * 2, 4]} position={0} />
+      <pointLight name="mid" intensity={4} distance={R} decay={2} position={[0, vlay.v.R / 2, 0]} castShadow />
+      <directionalLight name="low" intensity={2} position={[0, -1, -1]} />
+      <gridHelper args={[R, 4]} position={0} />
       <axesHelper args={[R]} />
       <group name="out" ref={vlay.v.out}>
-        <mesh name={'CSG'} castShadow material={vlay.mat.pos}>
+        <mesh name={'CSG'} castShadow>
           <CSG />
         </mesh>
       </group>
+      <mesh name="sea" renderOrder={2}>
+        <icosahedronGeometry args={[vlay.v.R * 2.5, 2]} />
+        <meshPhongMaterial color={0x002040} shininess={50} opacity={0.5} transparent />
+      </mesh>
       <mesh name="mirror" rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
-        <planeGeometry args={[R * 2, R * 2]} />
+        <planeGeometry args={[R, R]} />
         <MeshReflectorMaterial
           blur={[512, 128]}
           resolution={1024}
@@ -56,15 +60,7 @@ export default function App(props) {
 }
 
 function CSG() {
-  //codesandbox.io/s/busy-swirles-eckvc1
   //docs.pmnd.rs/react-three-fiber/api/events
-
-  // RAY-TEST LAYERS
-  vlay.v.csg.neg = useRef()
-  vlay.v.csg.geo = useRef()
-
-  vlay.v.csg.pos = useRef()
-
   useFrame((state) => {
     const geom = vlay.v.csg.geo.current
     if (geom && geom.userData.update) {
@@ -76,20 +72,21 @@ function CSG() {
     }
   })
 
+  // ray-test CSG
+  vlay.v.csg.neg = useRef()
+  vlay.v.csg.geo = useRef()
+
   let neg = new THREE.PlaneGeometry(0, 0)
-  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 4)
+  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 5)
   geo = mergeVertices(geo)
   geo.userData.pos = geo.attributes.position.clone()
-  // boxmap max resolution
+  // boxmap max-resolution
   vlay.mat.MAX = Math.min(geo.index.count / (6 / 3), 1024)
 
   return (
-    <Subtraction>
-      <Brush a ref={vlay.v.csg.geo} geometry={geo} />
-      <Brush a>
-        <Brush b ref={vlay.v.csg.neg} geometry={neg} material={vlay.mat.neg} />
-        <icosahedronGeometry b args={[vlay.v.R, 2]} />
-      </Brush>
+    <Subtraction useGroups>
+      <Brush a ref={vlay.v.csg.geo} geometry={geo} material={vlay.mat.pos} />
+      <Brush b ref={vlay.v.csg.neg} geometry={neg} material={vlay.mat.neg} />
     </Subtraction>
   )
 }
