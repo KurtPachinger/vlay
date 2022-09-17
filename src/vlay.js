@@ -7,10 +7,8 @@ const R = 10
 const vlay = {
   v: {
     R: R,
-    opt: { uid: true, seed: 0.5, iter: 5, view: 1 },
-    csg: {
-      /* geo, neg, pos */
-    },
+    opt: { uid: true, seed: 0.7, iter: 5, view: 1 },
+    csg: {}, // geo, neg, pos
     uid: {}
   },
   mat: {
@@ -18,17 +16,18 @@ const vlay = {
     box: new THREE.BoxGeometry(R, R, R, 2, 2, 2),
     img: new THREE.MeshBasicMaterial({
       name: 'img',
-      side: THREE.DoubleSide, //ray intersects
-      //map: terrain,
+      side: THREE.DoubleSide, // ray intersects
       transparent: true,
       opacity: 0.5
     }),
     neg: new THREE.MeshPhongMaterial({
       name: 'neg',
-      color: 0xc02020,
-      specular: 0xc0c0c0,
+      color: 0x2020c0,
+      specular: 0x4040c0,
+      side: THREE.DoubleSide, // CSG
       transparent: true,
-      opacity: 0.125,
+      flatShading: true,
+      opacity: 0.75,
       shininess: 30
     }),
     pos: new THREE.MeshPhongMaterial({
@@ -65,7 +64,6 @@ const vlay = {
 
     // BOXMAP
     let pos = vlay.mat.box.getAttribute('position')
-
     for (let i = 0; i < pos.count; i++) {
       let vtx = new THREE.Vector3()
       vtx.fromBufferAttribute(pos, i)
@@ -287,7 +285,7 @@ const vlay = {
         .step(1)
         .listen()
         .onChange(function (n) {
-          let onion = ['box', 'neg', 'CSG', 'pos', 'env']
+          let onion = ['box', 'neg', 'env', 'pos', 'CSG', 'points']
           //let onion = ['box', 'pos', 'CSG', 'neg']
           vlay.v.out.current.children.forEach(function (obj) {
             let meshes = obj.type === 'Group' ? obj.children : [obj]
@@ -307,7 +305,7 @@ const vlay = {
         let target = e.target
         if (target.nodeName.toLowerCase() === 'canvas') {
           // camera angle
-          const R = vlay.v.R * 2.5
+          const R = vlay.v.R * 8
           const view = [
             [R, 0, 0],
             [-R, 0, 0],
@@ -377,8 +375,11 @@ const vlay = {
       opt.i--
       vlay.gcut(opt)
     } else {
+      // OUTPUT
       console.log('accumulate', opt.accumulate)
+
       const pos = opt.env.getAttribute('position')
+      const points = new Float32Array(pos.count * 3)
       // accumulate: length ~= ( positions - 1x circumference )
       for (let i = 0; i < pos.count; i += 3) {
         // triangle moment
@@ -388,37 +389,48 @@ const vlay = {
 
         Object.keys(m.tri).forEach(function (corner, idx) {
           let v3 = m.tri[corner]
-
           if (isNaN(v3.length())) {
             // merged vertice (last)
             return
           }
-
           // lookup
           let xyz = v3.toArray().join('_')
           xyz = opt.accumulate[xyz] || [1]
           // transform accumulate
           let avg = xyz.reduce((a, b) => a + b)
           avg = avg / xyz.length
-          v3.multiplyScalar(avg)
+
+          v3.multiplyScalar(2 + avg)
           v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
-          // ouput to dummy clone for CSG
+
+          // ouput ( env, CSG... )
           pos.setXYZ(i + idx, v3.x, v3.y, v3.z)
+          points.set([v3.x, v3.y, v3.z], i * 3 + 3 * idx)
         })
       }
 
-      // output
+      // env surface
+      let env = new THREE.Mesh(opt.env, vlay.mat.pos)
+      env.name = 'env'
+      opt.group.add(env)
+
+      // env defects (pos/neg)
       opt.group = await vlay.segs(opt.group)
-      vlay.v.opt._preset.setValue(vlay.v.opt.view)
+
+      // env backdrop
+      const star = new THREE.BufferGeometry()
+      star.setAttribute('position', new THREE.BufferAttribute(points, 3))
+      const material = new THREE.PointsMaterial({ size: 4, emissive: 0x402040, color: 0x4020c0 })
+      let stars = new THREE.Points(star, material)
+      stars.scale.set(8, 8, 8)
+      stars.name = 'points'
+      opt.group.add(stars)
+
       // update r3f
       vlay.v.csg.geo.current.userData.update = true
       vlay.v.state.invalidate()
 
-      // ENVIRONMENT
-      let env = new THREE.Mesh(opt.env, vlay.mat.pos)
-      env.scale.set(2, 2, 2)
-      env.name = 'env'
-      opt.group.add(env)
+      vlay.v.opt._preset.setValue(vlay.v.opt.view)
     }
   },
   morph: function (opt) {
@@ -465,17 +477,17 @@ const vlay = {
         let ctx = blur.getContext('2d')
         let rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
         // rgba strength (grey is 1)
-        m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 255
-        if (rgba[3] === 0 || m.d === 0) {
-          // transparent pixel?
-          //continue
-        }
-        m.d += 1
+        m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
+        //m.d += 0.5
 
         // accumulate transformers
-        accumulate(false)
+        accumulate()
         function accumulate(d) {
           Object.keys(m.tri).forEach(function (corner, idx) {
+            if (rgba[3] === 0) {
+              // no zero-alpha multiplier
+              return
+            }
             let v3 = m.tri[corner]
             // lookup
             let xyz = v3.toArray().join('_')
@@ -484,12 +496,11 @@ const vlay = {
               opt.accumulate[xyz] = []
             }
             // unique vertex or triangle moment
-            if (!prev || d) {
+            if (!prev || isFinite(d)) {
               // todo: use index as key?
               opt.accumulate[xyz].push(d || m.d)
             } else {
               accumulate(m.d)
-              //return
             }
           })
         }
@@ -596,7 +607,7 @@ const vlay = {
       }
 
       // weight rank
-      let depth = c.forms / defects.length / vlay.v.R
+      let depth = c.forms / defects.length / (vlay.v.R / 4)
       let weight = c.label / defects.length
       weight = weight / fit.cluster.c || 0
       c.forms = vlay.util.num(depth + weight, { n: true })
@@ -609,33 +620,34 @@ const vlay = {
 
     function profile(c) {
       // feature
-      let poi = c.forms > 2 || c.forms < 0.33
+      let poi = c.forms > 4 || c.forms < 0.33
       // process
       let dif = c.depth[0] / c.depth[c.depth.length - 1]
       // classify connected geo-morph system
-      let system = poi || dif > 2
+      let system = poi || dif > 4
 
       // form-specific transforms
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
-        let range = (i + 1) / c.point.length
+        let range = 1 - (i + 1) / c.point.length
         let scale = c.forms / c.depth[i] / c.depth.length / 2
 
         if (c.label === 'neg') {
           if (system) {
             // tube (radial cave)
-            point.multiplyScalar(range)
+            point.multiplyScalar(0.25 + range * 2)
           } else {
+            //c.label = 'pos'
             // box (central cave)
-            //point.multiplyScalar(range * 0.5)
+            point.multiplyScalar(1)
           }
         } else if (c.label === 'pos') {
           if (system) {
             // tube (surface crust)
-            point.multiplyScalar(range)
+            point.multiplyScalar(1 + range * 0.5)
           } else {
             // box (orbital cloud)
-            //point.multiplyScalar(scale + 0.5)
+            point.multiplyScalar(2)
           }
         }
       }
@@ -653,6 +665,7 @@ const vlay = {
 
       function unit(idx) {
         let d = c.forms / c.depth[idx]
+        d *= c.label === 'neg' ? 2 : 0.5
         return d
       }
 
@@ -669,8 +682,6 @@ const vlay = {
           let pt = c.point[i]
           // params
           buf.translate(pt.x, pt.y, pt.z)
-          // meta-balls
-          align(geo, buf, c)
         } else {
           // connected
           const curve = new THREE.CatmullRomCurve3(c.point)
@@ -714,9 +725,8 @@ const vlay = {
     function align(geo, buf, c) {
       let hull = false
       if (c.idx >= 1) {
-        // c.system > 1
-        // c.forms > 1.5
-        let tolerance = c.label === 'neg' ? c.system : c.forms / 2
+        // meta-balls
+        let tolerance = c.label === 'neg' ? c.system * 2 : c.forms / 2
         hull = c.depth[c.idx - 1] / c.depth[c.idx] < tolerance
       }
 
@@ -760,20 +770,18 @@ const vlay = {
 
     function color(geo, c) {
       // CSG and MergeBufferGeometries require same attributes
-      // colors
       let pos = geo.getAttribute('position')
       geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       let col = geo.getAttribute('color')
       // vertex color
-
+      const MAX = vlay.v.R * 4
       for (let i = 0; i < pos.count; i++) {
-        let v_pos = new THREE.Vector3()
-        // vertex distance
-        v_pos.fromBufferAttribute(pos, i)
-        let d = (Math.abs(v_pos.x) + Math.abs(v_pos.y) + Math.abs(v_pos.z)) / 3
-        d = d / (vlay.v.R * 2)
-        col.setXYZ(i, 1 - d, 0.5, d)
+        let v3 = new THREE.Vector3()
+        v3.fromBufferAttribute(pos, i)
+        let d = v3.clampLength(0, MAX).length() / MAX
+        //d = vlay.util.num(d, { n: true })
+        col.setXYZ(i, 1 - d, 0.125, d)
       }
     }
 
