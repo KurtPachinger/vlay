@@ -8,7 +8,7 @@ const R = 10
 const vlay = {
   v: {
     R: R,
-    opt: { uid: true, seed: 0.5, iter: 5, view: 1 },
+    opt: { uid: true, seed: 0.75, iter: 5, view: 1 },
     csg: {}, // geo, neg, pos
     uid: {}
   },
@@ -284,7 +284,7 @@ const vlay = {
         .step(1)
         .listen()
         .onChange(function (n) {
-          let onion = ['box', 'neg', 'env', 'pos', 'CSG', 'points']
+          let onion = ['box', 'env', 'neg', 'pos', 'CSG', 'points']
           //let onion = ['box', 'pos', 'CSG', 'neg']
           vlay.v.out.current.children.forEach(function (obj) {
             let meshes = obj.type === 'Group' ? obj.children : [obj]
@@ -569,7 +569,7 @@ const vlay = {
       contour: []
     }
 
-    const maxSegs = 12
+    const maxSegs = 8
     Object.keys(group.userData.contour).forEach(function (face) {
       // de-dupe, minimum, sort distance
       let defects = [...new Set(group.userData.contour[face])]
@@ -645,7 +645,7 @@ const vlay = {
 
     function profile(c) {
       // feature
-      let poi = c.forms > 4 || c.forms < 0.25
+      let poi = c.forms > 6 || c.forms < 0.25
       // process
       let dif = c.depth[0] / c.depth[c.depth.length - 1]
       // classify connected geo-morph system
@@ -688,9 +688,8 @@ const vlay = {
       c.idx = 0
 
       function unit(idx) {
-        let d = c.forms / c.depth[idx]
-        d *= c.label === 'neg' ? 2 : 0.25
-        d *= (1 / c.system) * 1.33
+        let d = c.forms / c.system + c.depth[idx] * 2
+        d *= c.label === 'neg' ? 1.5 : 0.5
         return d
       }
 
