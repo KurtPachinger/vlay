@@ -20,37 +20,37 @@ export default function App() {
       <OrbitControls makeDefault />
       <pointLight
         name="top"
-        intensity={8}
+        intensity={2}
         distance={R * 4}
         decay={2}
-        position={[0, R, R]}
+        position={[0, R * 2, R]}
         castShadow
         shadow-mapSize-height={2048}
         shadow-mapSize-width={2048}
       />
-      <pointLight name="mid" intensity={4} distance={R} decay={2} position={[0, vlay.v.R / 2, 0]} castShadow />
-      <directionalLight name="low" intensity={2} position={[0, -1, -1]} />
+      <pointLight name="mid" intensity={2} distance={R} decay={2} position={[0, vlay.v.R / 4, 0]} castShadow />
+      <directionalLight name="low" intensity={0.125} position={[0, 0, -1]} />
       <gridHelper args={[R, 4]} position={0} />
       <axesHelper args={[R]} />
       <group name="out" ref={vlay.v.out}>
-        <mesh name={'CSG'} castShadow>
+        <mesh name={'CSG'}>
           <CSG />
         </mesh>
       </group>
       <mesh name="sea" renderOrder={2}>
         <icosahedronGeometry args={[vlay.v.R * 2.5, 2]} />
-        <meshPhongMaterial color={0x002040} shininess={50} opacity={0.5} transparent />
+        <meshPhongMaterial color={0x1080c0} opacity={0.5} transparent />
       </mesh>
       <mesh name="mirror" rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
         <planeGeometry args={[R, R]} />
         <MeshReflectorMaterial
           blur={[512, 128]}
           resolution={1024}
-          mixBlur={1.5}
+          mixBlur={1.75}
           mixStrength={50}
           roughness={0.5}
           depthScale={0.25}
-          color="#202020"
+          color="#808080"
           metalness={0.75}
         />
       </mesh>
@@ -79,9 +79,11 @@ function CSG() {
   let neg = new THREE.PlaneGeometry(0, 0)
   let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 5)
   geo = mergeVertices(geo)
-  geo.userData.pos = geo.attributes.position.clone()
+  //
+  geo.userData.pos = geo.getAttribute('position').clone()
+
   // boxmap max-resolution
-  vlay.mat.MAX = Math.min(geo.index.count / (6 / 3), 1024)
+  vlay.mat.MAX = Math.min(geo.index.count / (6 / 3), 512)
 
   return (
     <Subtraction useGroups>
