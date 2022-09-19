@@ -2,12 +2,13 @@ import * as THREE from 'three'
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js'
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js'
 import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { noise } from './noise.js'
 
 const R = 10
 const vlay = {
   v: {
     R: R,
-    opt: { uid: true, seed: 0.7, iter: 5, view: 1 },
+    opt: { uid: true, seed: 0.5, iter: 5, view: 1 },
     csg: {}, // geo, neg, pos
     uid: {}
   },
@@ -26,19 +27,17 @@ const vlay = {
       specular: 0x4040c0,
       side: THREE.DoubleSide, // CSG
       transparent: true,
-      flatShading: true,
       opacity: 0.75,
-      shininess: 30
+      shininess: 10
     }),
-    pos: new THREE.MeshPhongMaterial({
+    pos: new THREE.MeshStandardMaterial({
       name: 'pos',
-      color: 0x101040,
-      specular: 0x201010,
+      //color: 0x101040,
+      //specular: 0x201010,
       side: THREE.DoubleSide,
       shadowSide: THREE.BackSide,
-      flatShading: true,
       vertexColors: true,
-      shininess: 10
+      roughness: 1
     }),
     env: new THREE.MeshBasicMaterial({
       name: 'env',
@@ -350,7 +349,7 @@ const vlay = {
 
       // CUBEMAP
       if (opt.img || vlay.v.opt.uid) {
-        vlay.mat.map = vlay.matgen(opt.img || 0, opt)
+        vlay.mat.map = vlay.matgen(opt)
       }
       let box = new THREE.Mesh(vlay.mat.box, vlay.mat.map)
       box.name = 'box'
@@ -360,13 +359,15 @@ const vlay = {
       // MANTLE
       opt.group.userData.contour = {}
       opt.accumulate = {}
+      opt.rgba = {}
 
       let geo = vlay.v.csg.geo.current.geometry
-      geo.attributes.position.copy(geo.userData.pos)
-      geo.attributes.position.needsUpdate = true
+      geo.setAttribute('position', geo.userData.pos)
       opt.geo = geo
       // ENVIRONMENT
       opt.env = geo.clone()
+
+      opt.env.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.array.length), 3))
     }
 
     if (opt.i > 0) {
@@ -411,6 +412,7 @@ const vlay = {
 
       // env surface
       let env = new THREE.Mesh(opt.env, vlay.mat.pos)
+      env.castShadow = env.receiveShadow = true
       env.name = 'env'
       opt.group.add(env)
 
@@ -436,7 +438,7 @@ const vlay = {
   morph: function (opt) {
     //console.log('graphcut', opt)
 
-    // cubemap PYR attenuate/convolute
+    // CUBEMAP (PYR)
     let blurs = []
     let k = 1 - (opt.i - 1) / vlay.v.opt.iter
     let target = opt.group.getObjectByName('box')
@@ -449,14 +451,40 @@ const vlay = {
       blurs.push(blur)
     }
 
-    // *** to-do: memoize & reset position from userData ***
-    opt.geo.computeBoundingSphere()
+    function pyr(intersect) {
+      // color from boxmap PYR uv
+      let uv = intersect.uv
+      let blur = blurs[intersect.face.materialIndex]
+      let ctx = blur.getContext('2d')
+      let rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
+      return rgba
+    }
 
-    // defects from boxmap (for surface features)
-    let contour = opt.group.userData.contour
-    // raycast (for elevation, color)
-    const pos = opt.geo.getAttribute('position')
+    // RAYCAST
+    const ray = new THREE.Raycaster()
+    const dir = new THREE.Vector3()
+    // contour defects (from boxmap)
+    opt.geo.computeBoundingSphere()
     const ctr = opt.geo.boundingSphere.center
+    const pos = opt.geo.getAttribute('position')
+    let contour = opt.group.userData.contour
+
+    if (opt.i === 1) {
+      // low-res PYR
+      let v3 = new THREE.Vector3()
+      const col = opt.env.getAttribute('color')
+      // vertex color
+      for (let i = 0; i < pos.count; i++) {
+        v3.fromBufferAttribute(pos, i)
+        ray.set(ctr, dir.subVectors(v3, ctr).normalize())
+        const intersects = ray.intersectObject(target, false)
+        if (intersects.length) {
+          let intersect = intersects[0]
+          let rgba = pyr(intersect)
+          col.setXYZ(i, rgba[0] / 255, rgba[1] / 255, rgba[2] / 255)
+        }
+      }
+    }
 
     for (let i = 0; i < pos.count; i += 3) {
       // triangle moment
@@ -464,18 +492,14 @@ const vlay = {
       m.tri.setFromAttributeAndIndices(pos, i, i + 1, i + 2)
       m.tri.getMidpoint(m.mid)
       // raycast boxmap
-      const ray = new THREE.Raycaster()
-      const dir = new THREE.Vector3()
+
       ray.set(ctr, dir.subVectors(m.mid, ctr).normalize())
       // accumulate transformer
       const intersects = ray.intersectObject(target, false)
       if (intersects.length) {
         let intersect = intersects[0]
         // boxmap uv PYR
-        let uv = intersect.uv
-        let blur = blurs[intersect.face.materialIndex]
-        let ctx = blur.getContext('2d')
-        let rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
+        let rgba = pyr(intersect)
         // rgba strength (grey is 1)
         m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
         //m.d += 0.5
@@ -495,6 +519,7 @@ const vlay = {
             if (!prev) {
               opt.accumulate[xyz] = []
             }
+
             // unique vertex or triangle moment
             if (!prev || isFinite(d)) {
               // todo: use index as key?
@@ -620,17 +645,16 @@ const vlay = {
 
     function profile(c) {
       // feature
-      let poi = c.forms > 6 || c.forms < 0.33
+      let poi = c.forms > 4 || c.forms < 0.25
       // process
       let dif = c.depth[0] / c.depth[c.depth.length - 1]
       // classify connected geo-morph system
-      let system = poi || dif > 3
+      let system = poi || (dif > 0.75 && dif < 1.25)
 
       // form-specific transforms
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
         let range = 1 - (i + 1) / c.point.length
-        let scale = c.forms / c.depth[i] / c.depth.length / 2
 
         if (c.label === 'neg') {
           if (system) {
@@ -665,7 +689,8 @@ const vlay = {
 
       function unit(idx) {
         let d = c.forms / c.depth[idx]
-        d *= c.label === 'neg' ? 2 : 0.5
+        d *= c.label === 'neg' ? 2 : 0.25
+        d *= (1 / c.system) * 1.33
         return d
       }
 
@@ -726,7 +751,7 @@ const vlay = {
       let hull = false
       if (c.idx >= 1) {
         // meta-balls
-        let tolerance = c.label === 'neg' ? c.system * 2 : c.forms / 2
+        let tolerance = c.label === 'neg' ? c.system * 1.5 : c.forms / 2
         hull = c.depth[c.idx - 1] / c.depth[c.idx] < tolerance
       }
 
@@ -807,25 +832,9 @@ const vlay = {
     group.userData = { fit: fit.cluster }
     return group
   },
-  matgen: function (num, opt) {
-    function noise(canvas) {
-      let m = (canvas.width = canvas.height = vlay.mat.MAX)
-      let ctx = canvas.getContext('2d')
-
-      // kNN smooth in morph PYR: iter superpixel time/quality
-      const d = vlay.mat.MAX / 32
-      for (let x = 0; x < m; x += d) {
-        for (let y = 0; y < m; y += d) {
-          ctx.fillStyle = '#' + vlay.util.gen(opt.uid)
-          ctx.fillRect(x, y, d, d)
-        }
-      }
-
-      let tex = new THREE.CanvasTexture(canvas)
-      return tex
-    }
-
-    if (!num) {
+  matgen: function (opt) {
+    let img = opt.img || 0
+    if (!img) {
       vlay.util.reset('genmap')
     }
 
@@ -834,20 +843,22 @@ const vlay = {
     let fragment = new DocumentFragment()
     for (let i = 0; i < 6; i++) {
       let terrain
-      if (!num) {
-        const canvas = document.createElement('canvas')
-        // random noise (...game of life?)
+      if (!img) {
+        let canvas = document.createElement('canvas')
+        canvas.width = canvas.height = vlay.mat.MAX
         canvas.id = canvas.title = 'rnd_' + vlay.mat.xyz[i][0] + '_' + ts
-        terrain = noise(canvas)
+        // average noise
+        noise(canvas, vlay.v.opt.seed, opt.uid, vlay.v.uid)
+        terrain = new THREE.CanvasTexture(canvas)
         fragment.appendChild(canvas)
       } else {
-        terrain = new THREE.CanvasTexture(num[i][1])
+        terrain = new THREE.CanvasTexture(img[i][1])
       }
       terrain.minFilter = THREE.NearestFilter
       terrain.magFilter = THREE.NearestFilter
 
       let mat = vlay.mat.img.clone()
-      mat.name = !num ? 'genmap' : 'boxmap'
+      mat.name = !img ? 'genmap' : 'boxmap'
       mat.map = terrain
 
       cubemap.push(mat)
