@@ -8,7 +8,7 @@ const R = 10
 const vlay = {
   v: {
     R: R,
-    opt: { uid: true, seed: 0.75, iter: 5, view: 1 },
+    opt: { uid: true, seed: 0.75, iter: 5, view: 2, demo: false },
     csg: {}, // geo, neg, pos
     uid: {}
   },
@@ -282,7 +282,6 @@ const vlay = {
       let preset = gui
         .add(vlay.v.opt, 'view', 0, 4)
         .step(1)
-        .listen()
         .onChange(function (n) {
           let onion = ['box', 'env', 'neg', 'pos', 'CSG', 'points']
           //let onion = ['box', 'pos', 'CSG', 'neg']
@@ -298,6 +297,51 @@ const vlay = {
         })
 
       vlay.v.opt._preset = preset
+
+      // DEMO MODE
+      gui.add(vlay.v.opt, 'demo').onChange(function (n) {
+        //window.cancelAnimationFrame(vlay.v.step)
+        vlay.v.state.frameloop = n ? 'always' : 'demand'
+        if (n) {
+          vlay.v.step = function (timestamp) {
+            // settings
+            const R = vlay.v.R * 8
+            function rand(value) {
+              let rand = (value * Math.random()).toFixed(3)
+              return Number(rand)
+            }
+
+            let limit = 10_000
+            if (!vlay.v.demoS || vlay.v.demoS < timestamp) {
+              vlay.v.demoS = timestamp + limit
+              console.log('demo')
+              // presets
+              vlay.v.opt.uid = true
+              // view
+              vlay.v.opt.seed = rand(1)
+              vlay.v.opt.iter = Math.round(rand(10))
+              vlay.v.opt.view = Math.round(rand(4))
+              vlay.gcut()
+              // r3f
+              //vlay.v.state.invalidate()
+            }
+
+            // camera
+            let camera = vlay.v.state.camera
+            const time = -performance.now() * 0.0003
+            camera.position.x = R * Math.cos(time)
+            camera.position.z = R * Math.sin(time)
+            camera.lookAt(new THREE.Vector3(0, 0, 0))
+
+            if (vlay.v.opt.demo) {
+              window.requestAnimationFrame(vlay.v.step)
+            }
+          }
+
+          window.requestAnimationFrame(vlay.v.step)
+          //
+        }
+      })
     },
     minimap: function () {
       document.querySelector('details').addEventListener('click', function (e) {
@@ -430,9 +474,8 @@ const vlay = {
 
       // update r3f
       vlay.v.csg.geo.current.userData.update = true
-      vlay.v.state.invalidate()
-
-      vlay.v.opt._preset.setValue(vlay.v.opt.view)
+      vlay.v.state?.invalidate()
+      vlay.v.opt._preset?.setValue(vlay.v.opt.view)
     }
   },
   morph: function (opt) {
@@ -500,7 +543,7 @@ const vlay = {
         let intersect = intersects[0]
         // boxmap uv PYR
         let rgba = pyr(intersect)
-        // rgba strength (grey is 1)
+        // rgba strength (50% grey is 1, to multiply shadow/highlight)
         m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
         //m.d += 0.5
 
@@ -631,27 +674,26 @@ const vlay = {
         }
       }
 
-      // weight rank
-      let depth = c.forms / defects.length / (vlay.v.R / 4)
+      // weight rank (like d3 range/domain/scale)
+      let depth = c.forms / defects.length
       let weight = c.label / defects.length
-      weight = weight / fit.cluster.c || 0
-      c.forms = vlay.util.num(depth + weight, { n: true })
-      c.label = c.forms > 1.125 ? 'pos' : 'neg'
+      weight = weight / fit.cluster.c || 0.5
+      c.forms = vlay.util.num(Math.abs(1 - depth) + weight, { n: true })
+      c.label = c.forms >= 1.5 ? 'pos' : 'neg'
 
-      // curve defects
       //console.log('c', c)
       profile(c)
     }
 
     function profile(c) {
       // feature
-      let poi = c.forms > 6 || c.forms < 0.25
+      let poi = c.forms > 3 || c.forms < 0.25 // 4-1-0
       // process
       let dif = c.depth[0] / c.depth[c.depth.length - 1]
-      // classify connected geo-morph system
+      // connected geo-morph system
       let system = poi || (dif > 0.75 && dif < 1.25)
 
-      // form-specific transforms
+      // class-specific path transform
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
         let range = 1 - (i + 1) / c.point.length
@@ -688,9 +730,13 @@ const vlay = {
       c.idx = 0
 
       function unit(idx) {
-        let d = c.forms / c.system + c.depth[idx] * 2
-        d *= c.label === 'neg' ? 1.5 : 0.5
-        return d
+        const d = vlay.v.R / 4 // constant
+        let k = 0
+        //k += c.depth[idx] // rgba range
+        //k += c.forms / 2 // domain-weighted scale
+        //k += c.system / 2 // domain extent
+        //k += c.label === 'neg' ? 3 : 0.33 // category
+        return d + k
       }
 
       // OUTPUT mesh (CSG)
@@ -700,7 +746,7 @@ const vlay = {
         if (c.system > 1) {
           // not connected
           if (c.label === 'neg') {
-            d *= c.forms * 2
+            //d *= c.forms * 2
           }
           buf = new THREE.TetrahedronGeometry(d, 1)
           let pt = c.point[i]
@@ -748,9 +794,11 @@ const vlay = {
 
     function align(geo, buf, c) {
       let hull = false
+      // TO-DO: after updates corrected "normal" values,
+      // can hull be c.forms, tube or not, pos/neg or not?
       if (c.idx >= 1) {
         // meta-balls
-        let tolerance = c.label === 'neg' ? c.system * 1.5 : c.forms / 2
+        let tolerance = c.label === 'neg' ? c.system * 1.5 : c.forms
         hull = c.depth[c.idx - 1] / c.depth[c.idx] < tolerance
       }
 
