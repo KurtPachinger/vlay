@@ -37,9 +37,8 @@ export default function App() {
           <CSG />
         </mesh>
       </group>
-      <mesh name="sea" renderOrder={2}>
+      <mesh name="sea" renderOrder={2} material={vlay.mat.neg}>
         <icosahedronGeometry args={[vlay.v.R * 2.5, 2]} />
-        <meshPhongMaterial color={0x1080c0} opacity={0.5} transparent />
       </mesh>
       <mesh name="mirror" rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
         <planeGeometry args={[R, R]} />
