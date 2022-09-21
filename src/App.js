@@ -18,22 +18,13 @@ export default function App() {
     <Canvas frameloop="demand" performance={{ min: 0.1 }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
       <fog attach="fog" args={['black', 0, 400]} />
       <OrbitControls makeDefault />
-      <pointLight
-        name="top"
-        intensity={2}
-        distance={R * 4}
-        decay={2}
-        position={[0, R * 2, R]}
-        castShadow
-        shadow-mapSize-height={2048}
-        shadow-mapSize-width={2048}
-      />
-      <pointLight name="mid" intensity={2} distance={R} decay={2} position={[0, vlay.v.R / 4, 0]} castShadow />
-      <directionalLight name="low" intensity={0.125} position={[0, 0, -1]} />
+      <pointLight name="top" intensity={60000} decay={2} position={[0, R * 2, R]} castShadow />
+      <pointLight name="mid" intensity={200} position={[0, vlay.v.R / 2, 0]} castShadow />
+      <directionalLight name="low" intensity={0.25} position={[0, -1, -1]} />
       <gridHelper args={[R, 4]} position={0} />
       <axesHelper args={[R]} />
       <group name="out" ref={vlay.v.out}>
-        <mesh name={'CSG'}>
+        <mesh name={'CSG'} castShadow receiveShadow>
           <CSG />
         </mesh>
       </group>
@@ -43,14 +34,14 @@ export default function App() {
       <mesh name="mirror" rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.001, 0]} receiveShadow>
         <planeGeometry args={[R, R]} />
         <MeshReflectorMaterial
-          blur={[512, 128]}
-          resolution={1024}
-          mixBlur={1.75}
-          mixStrength={50}
-          roughness={0.5}
-          depthScale={0.25}
-          color="#808080"
-          metalness={0.75}
+          blur={[256, 128]}
+          resolution={512}
+          mixBlur={0.75}
+          mixStrength={25}
+          roughness={1}
+          depthScale={0.5}
+          color="#202020"
+          metalness={0.5}
         />
       </mesh>
       <AdaptiveDpr pixelated />
@@ -76,13 +67,10 @@ function CSG() {
   vlay.v.csg.geo = useRef()
 
   let neg = new THREE.PlaneGeometry(0, 0)
-  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 5)
+  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 6)
   geo = mergeVertices(geo)
   //
   geo.userData.pos = geo.getAttribute('position').clone()
-
-  // boxmap max-resolution
-  vlay.mat.MAX = Math.min(geo.index.count / (6 / 3), 512)
 
   return (
     <Subtraction useGroups>
