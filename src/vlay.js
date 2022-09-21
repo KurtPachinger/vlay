@@ -23,28 +23,21 @@ const vlay = {
     }),
     neg: new THREE.MeshPhongMaterial({
       name: 'neg',
-      color: 0x2020c0,
-      specular: 0x4040c0,
-      side: THREE.DoubleSide, // CSG
+      color: 0x102080,
+      specular: 0x002010,
+      side: THREE.DoubleSide,
+      shadowSide: THREE.FrontSide,
       transparent: true,
-      opacity: 0.75,
-      shininess: 10
+      opacity: 0.8,
+      shininess: 20
     }),
-    pos: new THREE.MeshStandardMaterial({
+    pos: new THREE.MeshPhongMaterial({
       name: 'pos',
-      //color: 0x101040,
-      //specular: 0x201010,
+      specular: 0x201010,
       side: THREE.DoubleSide,
       shadowSide: THREE.BackSide,
       vertexColors: true,
-      roughness: 1
-    }),
-    env: new THREE.MeshBasicMaterial({
-      name: 'env',
-      color: 0x4010c0,
-      side: THREE.BackSide,
-      transparent: true,
-      opacity: 0.25
+      shininess: 60
     }),
     xyz: [
       ['px', 'posx', 'right', '.50,.33'],
@@ -60,6 +53,7 @@ const vlay = {
     vlay.v.state = state
     vlay.util.gui()
     vlay.util.minimap()
+    state.gl.physicallyCorrectLights = true
 
     // BOXMAP
     let pos = vlay.mat.box.getAttribute('position')
@@ -195,8 +189,8 @@ const vlay = {
 
           // await cubemap, sort, and proceed
           if (cm.length >= files.length) {
-            document.getElementById('boxmap').appendChild(fragment)
             cm.sort()
+            document.getElementById('boxmap').appendChild(fragment)
             vlay.v.opt.uid = false
             vlay.gcut({ img: cm, uid: 'img' })
           }
@@ -270,12 +264,14 @@ const vlay = {
       gui
         .add(vlay.v.opt, 'seed', 0, 1)
         .step(0.05)
+        .listen()
         .onFinishChange(function (n) {
           vlay.gcut({ s: n })
         })
       gui
         .add(vlay.v.opt, 'iter', 1, 10)
         .step(1)
+        .listen()
         .onFinishChange(function (n) {
           vlay.gcut({ i: n })
         })
@@ -318,9 +314,9 @@ const vlay = {
               // presets
               vlay.v.opt.uid = true
               // view
-              vlay.v.opt.seed = rand(1)
-              vlay.v.opt.iter = Math.round(rand(10))
-              vlay.v.opt.view = Math.round(rand(4))
+              vlay.v.opt.seed = rand(1) + 0.001
+              vlay.v.opt.iter = Math.round(rand(9)) + 1
+              vlay.v.opt.view = Math.round(rand(3))
               vlay.gcut()
               // r3f
               //vlay.v.state.invalidate()
@@ -375,7 +371,7 @@ const vlay = {
 
     if (!opt.init) {
       //vlay.v.state.performance.regress()
-      // INIT
+      // OPTIONS
       opt.init = true
       opt.i = opt.i || vlay.v.opt.iter
       opt.s = opt.s || vlay.v.opt.seed
@@ -386,12 +382,30 @@ const vlay = {
       //vlay.util.reset(vlay.v.out.current.getObjectByName(opt.uid))
       vlay.util.reset(vlay.v.out.current.getObjectByName('rnd'))
       vlay.util.reset(vlay.v.out.current.getObjectByName('img'))
+
       // GROUP
       opt.group = new THREE.Group()
       opt.group.name = opt.uid
       vlay.v.out.current.add(opt.group)
 
+      // GEOMETRY
+      // csg
+      opt.group.userData.contour = {}
+      opt.accumulate = {}
+
+      let geo = vlay.v.csg.geo.current.geometry
+      geo.setAttribute('position', geo.userData.pos)
+      opt.geo = geo
+      // environment
+      opt.env = geo.clone()
+
+      opt.env.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.array.length), 3))
+
       // CUBEMAP
+      // max-resolution
+      let poly = opt.geo.index.count / (6 / 3)
+      let iter = Math.pow(2, Math.round(opt.i / 2)) * 16
+      vlay.mat.MAX = Math.min(poly, iter)
       if (opt.img || vlay.v.opt.uid) {
         vlay.mat.map = vlay.matgen(opt)
       }
@@ -399,19 +413,6 @@ const vlay = {
       box.name = 'box'
       box.renderOrder = 2
       opt.group.add(box)
-
-      // MANTLE
-      opt.group.userData.contour = {}
-      opt.accumulate = {}
-      opt.rgba = {}
-
-      let geo = vlay.v.csg.geo.current.geometry
-      geo.setAttribute('position', geo.userData.pos)
-      opt.geo = geo
-      // ENVIRONMENT
-      opt.env = geo.clone()
-
-      opt.env.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.array.length), 3))
     }
 
     if (opt.i > 0) {
@@ -453,6 +454,7 @@ const vlay = {
           points.set([v3.x, v3.y, v3.z], i * 3 + 3 * idx)
         })
       }
+      opt.env.computeVertexNormals()
 
       // env surface
       let env = new THREE.Mesh(opt.env, vlay.mat.pos)
@@ -466,7 +468,7 @@ const vlay = {
       // env backdrop
       const star = new THREE.BufferGeometry()
       star.setAttribute('position', new THREE.BufferAttribute(points, 3))
-      const material = new THREE.PointsMaterial({ size: 4, emissive: 0x402040, color: 0x4020c0 })
+      const material = new THREE.PointsMaterial({ size: 3, color: 0x401080 })
       let stars = new THREE.Points(star, material)
       stars.scale.set(8, 8, 8)
       stars.name = 'points'
@@ -534,47 +536,45 @@ const vlay = {
       let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3() }
       m.tri.setFromAttributeAndIndices(pos, i, i + 1, i + 2)
       m.tri.getMidpoint(m.mid)
-      // raycast boxmap
 
+      // raycast boxmap (uv PYR)
       ray.set(ctr, dir.subVectors(m.mid, ctr).normalize())
-      // accumulate transformer
       const intersects = ray.intersectObject(target, false)
       if (intersects.length) {
         let intersect = intersects[0]
-        // boxmap uv PYR
-        let rgba = pyr(intersect)
-        // rgba strength (50% grey is 1, to multiply shadow/highlight)
-        m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
+        m.rgba = pyr(intersect)
+        // rgba multiple (50% grey is 1)
+        m.d = (m.rgba[0] + m.rgba[1] + m.rgba[2]) / 3 / 127.5
         //m.d += 0.5
 
         // accumulate transformers
-        accumulate()
-        function accumulate(d) {
-          Object.keys(m.tri).forEach(function (corner, idx) {
-            if (rgba[3] === 0) {
-              // no zero-alpha multiplier
-              return
-            }
-            let v3 = m.tri[corner]
-            // lookup
-            let xyz = v3.toArray().join('_')
-            let prev = opt.accumulate[xyz]
-            if (!prev) {
-              opt.accumulate[xyz] = []
-            }
-
-            // unique vertex or triangle moment
-            if (!prev || isFinite(d)) {
-              // todo: use index as key?
-              opt.accumulate[xyz].push(d || m.d)
-            } else {
-              accumulate(m.d)
-            }
-          })
-        }
-
+        accumulate(m)
         moment(m, intersect)
       }
+    }
+
+    function accumulate(m, d) {
+      Object.keys(m.tri).forEach(function (corner) {
+        if (m.rgba[3] === 0) {
+          // no zero-alpha multiplier
+          return
+        }
+        let v3 = m.tri[corner]
+        // lookup
+        let xyz = v3.toArray().join('_')
+        let prev = opt.accumulate[xyz]
+        if (!prev) {
+          opt.accumulate[xyz] = []
+        }
+
+        // unique vertex or triangle moment
+        if (!prev || isFinite(d)) {
+          // todo: use index as key?
+          opt.accumulate[xyz].push(d || m.d)
+        } else {
+          accumulate(m, m.d)
+        }
+      })
     }
 
     function moment(m, intersect) {
@@ -605,7 +605,7 @@ const vlay = {
   },
   segs: function (group) {
     // fit roi contour to landmark type
-    let fit = {
+    let seg = {
       pos: false,
       neg: false,
       cluster: { c: 0, pos: 0, neg: 0 },
@@ -629,23 +629,23 @@ const vlay = {
         segs.push(defect)
         // label cluster
         let label = defect.slice(defect.lastIndexOf('|') + 1)
-        fit.cluster[label]++
-        fit.cluster.c++
+        seg.cluster[label]++
+        seg.cluster.c++
       }
-      fit.contour.push(segs)
+      seg.contour.push(segs)
     })
     // weight rank
-    fit.contour.sort().reverse()
-    fit.cluster.c = Number((fit.cluster.pos / fit.cluster.c).toFixed(3))
-    if (!isFinite(fit.cluster.c)) {
+    seg.contour.sort().reverse()
+    seg.cluster.c = Number((seg.cluster.pos / seg.cluster.c).toFixed(3))
+    if (!isFinite(seg.cluster.c)) {
       // no contours
-      fit.cluster.c = 0.5
+      seg.cluster.c = 0.5
     }
 
     // classification
-    //console.log('contour', fit.contour)
-    for (let i = 0; i < fit.contour.length; i++) {
-      let defects = fit.contour[i]
+    //console.log('contour', seg.contour)
+    for (let i = 0; i < seg.contour.length; i++) {
+      let defects = seg.contour[i]
 
       let c = { depth: [], point: [], label: 0, forms: 0 }
       for (let i = 0; i < defects.length; i++) {
@@ -677,7 +677,7 @@ const vlay = {
       // weight rank (like d3 range/domain/scale)
       let depth = c.forms / defects.length
       let weight = c.label / defects.length
-      weight = weight / fit.cluster.c || 0.5
+      weight = weight / seg.cluster.c || 0.5
       c.forms = vlay.util.num(Math.abs(1 - depth) + weight, { n: true })
       c.label = c.forms >= 1.5 ? 'pos' : 'neg'
 
@@ -757,7 +757,7 @@ const vlay = {
           const curve = new THREE.CatmullRomCurve3(c.point)
           // params
           const extrude = {
-            steps: 24,
+            steps: maxSegs * 2,
             bevelEnabled: false,
             extrudePath: curve
           }
@@ -776,7 +776,7 @@ const vlay = {
       }
 
       // merge geometries with all previous
-      let last = fit[c.label]
+      let last = seg[c.label]
       let merge = last ? [last, geo].flat() : [geo].flat()
       merge = mergeBufferGeometries(merge, false)
       if (merge !== null) {
@@ -788,7 +788,7 @@ const vlay = {
           merge.userData.mergedUserData = null
         }
         // output
-        fit[c.label] = merge
+        seg[c.label] = merge
       }
     }
 
@@ -853,59 +853,57 @@ const vlay = {
         v3.fromBufferAttribute(pos, i)
         let d = v3.clampLength(0, MAX).length() / MAX
         //d = vlay.util.num(d, { n: true })
-        col.setXYZ(i, 1 - d, 0.125, d)
+        col.setXYZ(i, 1 - d, 0.25, d)
       }
     }
 
-    console.log('segs', fit)
+    console.log('segs', seg)
     let fitline = new THREE.PlaneGeometry(0, 0)
     let feats = ['neg', 'pos']
     feats.forEach(function (label) {
       // cavities buffer geometry to mesh
 
-      let csg = new THREE.Mesh(fit[label] || fitline, vlay.mat[label])
+      let csg = new THREE.Mesh(seg[label] || fitline, vlay.mat[label])
       csg.name = csg.geometry.name = label
 
       if (label === 'pos') {
         csg.castShadow = csg.receiveShadow = true
-      }
-      group.add(csg)
-      if (label === 'neg') {
+      } else if (label === 'neg') {
         vlay.v.csg[label].current.geometry = csg.geometry
       }
+      csg.geometry.computeVertexNormals()
+      group.add(csg)
     })
 
     // output
-    group.userData = { fit: fit.cluster }
+    group.userData = { seg: seg.cluster }
     return group
   },
   matgen: function (opt) {
-    let img = opt.img || 0
-    if (!img) {
+    let cubemap = []
+    let fragment = new DocumentFragment()
+    let ts = Date.now()
+
+    let rnd
+    if (!opt.img) {
       vlay.util.reset('genmap')
+      rnd = noise(vlay.mat.MAX, 6, vlay.v.opt.seed, opt.uid, vlay.v.uid)
     }
 
-    let cubemap = []
-    let ts = Date.now()
-    let fragment = new DocumentFragment()
     for (let i = 0; i < 6; i++) {
+      let tex = opt.img ? opt.img[i][1] : rnd[i]
       let terrain
-      if (!img) {
-        let canvas = document.createElement('canvas')
-        canvas.width = canvas.height = vlay.mat.MAX
-        canvas.id = canvas.title = 'rnd_' + vlay.mat.xyz[i][0] + '_' + ts
-        // average noise
-        noise(canvas, vlay.v.opt.seed, opt.uid, vlay.v.uid)
-        terrain = new THREE.CanvasTexture(canvas)
-        fragment.appendChild(canvas)
-      } else {
-        terrain = new THREE.CanvasTexture(img[i][1])
+      if (!opt.img) {
+        tex.id = tex.title = 'rnd_' + vlay.mat.xyz[i][0] + '_' + ts
+        fragment.appendChild(tex)
       }
+
+      terrain = new THREE.CanvasTexture(tex)
       terrain.minFilter = THREE.NearestFilter
       terrain.magFilter = THREE.NearestFilter
 
       let mat = vlay.mat.img.clone()
-      mat.name = !img ? 'genmap' : 'boxmap'
+      mat.name = opt.img ? 'boxmap' : 'genmap'
       mat.map = terrain
 
       cubemap.push(mat)
