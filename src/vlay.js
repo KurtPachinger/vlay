@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js'
 import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js'
 import { mergeBufferGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { noise } from './noise.js'
+import { seedmap } from './seedmap.js'
 
 const R = 10
 const vlay = {
@@ -370,7 +370,7 @@ const vlay = {
     console.log('gcut', opt.i)
 
     if (!opt.init) {
-      //vlay.v.state.performance.regress()
+      //let test = await vlay.v.state.performance.regress()
       // OPTIONS
       opt.init = true
       opt.i = opt.i || vlay.v.opt.iter
@@ -404,7 +404,7 @@ const vlay = {
       // CUBEMAP
       // max-resolution
       let poly = opt.geo.index.count / (6 / 3)
-      let iter = Math.pow(2, Math.round(opt.i / 2)) * 16
+      let iter = Math.pow(2, Math.round(opt.i / 2)) * 8
       vlay.mat.MAX = Math.min(poly, iter)
       if (opt.img || vlay.v.opt.uid) {
         vlay.mat.map = vlay.matgen(opt)
@@ -422,7 +422,7 @@ const vlay = {
       vlay.gcut(opt)
     } else {
       // OUTPUT
-      console.log('accumulate', opt.accumulate)
+      //console.log('accumulate', opt.accumulate)
 
       const pos = opt.env.getAttribute('position')
       const points = new Float32Array(pos.count * 3)
@@ -606,8 +606,8 @@ const vlay = {
   segs: function (group) {
     // fit roi contour to landmark type
     let seg = {
-      pos: false,
-      neg: false,
+      pos: [],
+      neg: [],
       cluster: { c: 0, pos: 0, neg: 0 },
       contour: []
     }
@@ -771,47 +771,32 @@ const vlay = {
           const ellipsoid = new THREE.Shape(pts)
           buf = new THREE.ExtrudeGeometry(ellipsoid, extrude)
         }
-        // output
+        // hull and sanitize
         align(geo, buf, c)
       }
-
-      // merge geometries with all previous
-      let last = seg[c.label]
-      let merge = last ? [last, geo].flat() : [geo].flat()
-      merge = mergeBufferGeometries(merge, false)
-      if (merge !== null) {
-        // feedback
-        if (!last) {
-          merge.userData.count = c.system
-        } else {
-          merge.userData.count = last.userData.count + c.system
-          merge.userData.mergedUserData = null
-        }
-        // output
-        seg[c.label] = merge
-      }
+      // defects to merge
+      seg[c.label].push(geo)
     }
 
     function align(geo, buf, c) {
+      // hull...?
       let hull = false
-      // TO-DO: after updates corrected "normal" values,
-      // can hull be c.forms, tube or not, pos/neg or not?
       if (c.idx >= 1) {
-        // meta-balls
+        // TO-DO: after updates corrected "normal" values,
+        // can hull be c.forms, tube or not, pos/neg or not?
         let tolerance = c.label === 'neg' ? c.system * 1.5 : c.forms
         hull = c.depth[c.idx - 1] / c.depth[c.idx] < tolerance
       }
 
       if (hull) {
-        // convex hull
+        // set
         const vertices = []
         const hulls = []
         hulls.push(buf)
         if (geo.length) {
           hulls.push(geo[geo.length - 1])
         }
-
-        // consolidate
+        // join
         hulls.forEach(function (geom) {
           let pos = geom.getAttribute('position')
           for (let i = 0; i < pos.count; i++) {
@@ -820,14 +805,14 @@ const vlay = {
             vertices.push(vertex)
           }
         })
-        // replace last
-
+        // replace
         buf = new ConvexGeometry(vertices)
       }
 
-      // final pass
+      // sanitize
       buf = mergeVertices(buf)
-      color(buf, c)
+      delete buf.attributes.uv
+      delete buf.attributes.normal
 
       // output
       if (hull) {
@@ -836,13 +821,13 @@ const vlay = {
         geo.push(buf)
       }
 
-      // tracking usage of merge
+      // merge index
       c.idx++
     }
 
     function color(geo, c) {
-      // CSG and MergeBufferGeometries require same attributes
       let pos = geo.getAttribute('position')
+      // CSG needs uv
       geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       let col = geo.getAttribute('color')
@@ -857,21 +842,35 @@ const vlay = {
       }
     }
 
-    console.log('segs', seg)
+    console.log('segs', seg.cluster)
     let fitline = new THREE.PlaneGeometry(0, 0)
-    let feats = ['neg', 'pos']
+    let feats = ['pos', 'neg']
     feats.forEach(function (label) {
       // cavities buffer geometry to mesh
+      let merge
+      let geo = seg[label].flat()
+      if (geo.length) {
+        // same attributes required (csg/buffer)
+        merge = mergeBufferGeometries(geo)
+        if (merge === null) {
+          merge = fitline
+        }
+        merge.userData = { segs: geo.length }
+        // align(c) would permit label-specific attributes...
+        color(merge)
+        merge.computeVertexNormals()
+      }
 
-      let csg = new THREE.Mesh(seg[label] || fitline, vlay.mat[label])
-      csg.name = csg.geometry.name = label
-
+      let csg = new THREE.Mesh(merge, vlay.mat[label])
+      // attributes
       if (label === 'pos') {
         csg.castShadow = csg.receiveShadow = true
       } else if (label === 'neg') {
         vlay.v.csg[label].current.geometry = csg.geometry
       }
-      csg.geometry.computeVertexNormals()
+
+      csg.name = csg.geometry.name = label
+
       group.add(csg)
     })
 
@@ -887,11 +886,13 @@ const vlay = {
     let rnd
     if (!opt.img) {
       vlay.util.reset('genmap')
-      rnd = noise(vlay.mat.MAX, 6, vlay.v.opt.seed, opt.uid, vlay.v.uid)
+      // ... name/canvas
+      rnd = seedmap(vlay.v.opt.seed, vlay.mat.MAX, 6)
+      vlay.v.uid[opt.uid] = rnd.seed
     }
 
     for (let i = 0; i < 6; i++) {
-      let tex = opt.img ? opt.img[i][1] : rnd[i]
+      let tex = opt.img ? opt.img[i][1] : rnd.map[i]
       let terrain
       if (!opt.img) {
         tex.id = tex.title = 'rnd_' + vlay.mat.xyz[i][0] + '_' + ts
