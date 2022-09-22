@@ -5,7 +5,7 @@ import * as THREE from 'three'
 //three/examples/jsm/materials/MeshGouraudMaterial.js
 import { useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { OrbitControls, MeshReflectorMaterial, AdaptiveDpr } from '@react-three/drei'
+import { OrbitControls, MeshReflectorMaterial } from '@react-three/drei'
 import { Brush, Subtraction } from '@react-three/csg'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
@@ -15,7 +15,7 @@ export default function App() {
 
   const R = vlay.v.R * 8
   return (
-    <Canvas frameloop="demand" performance={{ min: 0.1 }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
+    <Canvas frameloop="demand" gl={{ antialias: false }} shadows camera={{ position: [0, R, R] }} onCreated={(state) => vlay.init(state)}>
       <fog attach="fog" args={['black', 0, 400]} />
       <OrbitControls makeDefault />
       <pointLight name="top" intensity={60000} decay={2} position={[0, R * 2, R]} castShadow />
@@ -44,7 +44,6 @@ export default function App() {
           metalness={0.5}
         />
       </mesh>
-      <AdaptiveDpr pixelated />
     </Canvas>
   )
 }
@@ -67,7 +66,7 @@ function CSG() {
   vlay.v.csg.geo = useRef()
 
   let neg = new THREE.PlaneGeometry(0, 0)
-  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 6)
+  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 8)
   geo = mergeVertices(geo)
   //
   geo.userData.pos = geo.getAttribute('position').clone()
