@@ -8,7 +8,7 @@ const R = 10
 const vlay = {
   v: {
     R: R,
-    opt: { uid: true, seed: 0.75, iter: 5, view: 2, demo: false },
+    opt: { uid: true, seed: 0.5, iter: 5, view: 1, demo: false },
     csg: {}, // geo, neg, pos
     uid: {}
   },
@@ -38,6 +38,12 @@ const vlay = {
       shadowSide: THREE.BackSide,
       vertexColors: true,
       shininess: 60
+    }),
+    emit: new THREE.PointsMaterial({
+      size: 3,
+      color: 0xffffff,
+      opacity: 0.5,
+      transparent: true
     }),
     xyz: [
       ['px', 'posx', 'right', '.50,.33'],
@@ -285,8 +291,10 @@ const vlay = {
             let meshes = obj.type === 'Group' ? obj.children : [obj]
             for (let i = 0; i < meshes.length; i++) {
               let mesh = meshes[i]
-              let view = onion.indexOf(mesh.name) >= n
-              mesh.visible = view
+              let view = onion.indexOf(mesh.name)
+              if (view > -1) {
+                mesh.visible = view >= n
+              }
             }
           })
           vlay.v.state.invalidate()
@@ -298,6 +306,7 @@ const vlay = {
       gui.add(vlay.v.opt, 'demo').onChange(function (n) {
         //window.cancelAnimationFrame(vlay.v.step)
         vlay.v.state.frameloop = n ? 'always' : 'demand'
+        vlay.v.state.invalidate()
         if (n) {
           vlay.v.step = function (timestamp) {
             // settings
@@ -329,8 +338,30 @@ const vlay = {
             camera.position.z = R * Math.sin(time)
             camera.lookAt(new THREE.Vector3(0, 0, 0))
 
+            // dynamic
+            if (vlay.v.particles) {
+              const positions = vlay.v.particles.geometry.attributes.position.array
+              let origin = new THREE.Vector3(0, 0, 0)
+              for (let i = 0; i < positions.length; i += 3) {
+                let pos = new THREE.Vector3(positions[i + 0], positions[i + 1], positions[i + 2])
+                if (pos.distanceTo(origin) < vlay.v.R * 2) {
+                  positions[i + 0] *= 2
+                  positions[i + 1] *= 2
+                  positions[i + 2] *= 2
+                } else {
+                  positions[i + 0] *= 0.99
+                  positions[i + 1] *= 0.99
+                  positions[i + 2] *= 0.99
+                }
+              }
+
+              vlay.v.particles.geometry.attributes.position.needsUpdate = true
+            }
+
             if (vlay.v.opt.demo) {
               window.requestAnimationFrame(vlay.v.step)
+            } else {
+              window.cancelAnimationFrame(vlay.v.step)
             }
           }
 
@@ -391,7 +422,7 @@ const vlay = {
       // GEOMETRY
       // csg
       opt.group.userData.contour = {}
-      opt.accumulate = {}
+      opt.rgba = []
 
       let geo = vlay.v.csg.geo.current.geometry
       geo.setAttribute('position', geo.userData.pos)
@@ -425,8 +456,8 @@ const vlay = {
       //console.log('accumulate', opt.accumulate)
 
       const pos = opt.env.getAttribute('position')
-      const points = new Float32Array(pos.count * 3)
-      // accumulate: length ~= ( positions - 1x circumference )
+
+      // surface accumulate: length ~= ( positions - 1x circumference )
       for (let i = 0; i < pos.count; i += 3) {
         // triangle moment
         let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3() }
@@ -441,7 +472,7 @@ const vlay = {
           }
           // lookup
           let xyz = v3.toArray().join('_')
-          xyz = opt.accumulate[xyz] || [1]
+          xyz = opt.rgba[xyz] || [1]
           // transform accumulate
           let avg = xyz.reduce((a, b) => a + b)
           avg = avg / xyz.length
@@ -451,7 +482,6 @@ const vlay = {
 
           // ouput ( env, CSG... )
           pos.setXYZ(i + idx, v3.x, v3.y, v3.z)
-          points.set([v3.x, v3.y, v3.z], i * 3 + 3 * idx)
         })
       }
       opt.env.computeVertexNormals()
@@ -464,15 +494,6 @@ const vlay = {
 
       // env defects (pos/neg)
       opt.group = await vlay.segs(opt.group)
-
-      // env backdrop
-      const star = new THREE.BufferGeometry()
-      star.setAttribute('position', new THREE.BufferAttribute(points, 3))
-      const material = new THREE.PointsMaterial({ size: 3, color: 0x401080 })
-      let stars = new THREE.Points(star, material)
-      stars.scale.set(8, 8, 8)
-      stars.name = 'points'
-      opt.group.add(stars)
 
       // update r3f
       vlay.v.csg.geo.current.userData.update = true
@@ -562,15 +583,15 @@ const vlay = {
         let v3 = m.tri[corner]
         // lookup
         let xyz = v3.toArray().join('_')
-        let prev = opt.accumulate[xyz]
+        let prev = opt.rgba[xyz]
         if (!prev) {
-          opt.accumulate[xyz] = []
+          opt.rgba[xyz] = []
         }
 
         // unique vertex or triangle moment
         if (!prev || isFinite(d)) {
           // todo: use index as key?
-          opt.accumulate[xyz].push(d || m.d)
+          opt.rgba[xyz].push(d || m.d)
         } else {
           accumulate(m, m.d)
         }
@@ -609,7 +630,8 @@ const vlay = {
       pos: [],
       neg: [],
       cluster: { c: 0, pos: 0, neg: 0 },
-      contour: []
+      contour: [],
+      emit: { static: [], dynamic: [] }
     }
 
     const maxSegs = 8
@@ -693,6 +715,12 @@ const vlay = {
       // connected geo-morph system
       let system = poi || (dif > 0.75 && dif < 1.25)
 
+      // tertiary surface point clouds (weather, constellations)
+      if (c.label === 'pos') {
+        let cloud = system ? 'static' : 'dynamic'
+        seg.emit[cloud].push(c.point)
+      }
+
       // class-specific path transform
       for (let i = 0; i < c.point.length; i++) {
         const point = c.point[i]
@@ -720,7 +748,6 @@ const vlay = {
 
       // geometry type
       c.system = system ? 1 : c.point.length
-
       topo(c)
     }
 
@@ -752,6 +779,9 @@ const vlay = {
           let pt = c.point[i]
           // params
           buf.translate(pt.x, pt.y, pt.z)
+          //
+          //
+          // pointsMaterial (rain, constellation)
         } else {
           // connected
           const curve = new THREE.CatmullRomCurve3(c.point)
@@ -823,6 +853,7 @@ const vlay = {
 
       // merge index
       c.idx++
+      return buf
     }
 
     function color(geo, c) {
@@ -842,7 +873,12 @@ const vlay = {
       }
     }
 
-    console.log('segs', seg.cluster)
+    // testing tertiary CSG
+    //let ball = new THREE.TetrahedronGeometry(vlay.v.R * 1, 1)
+    //let buf = align(seg.neg, ball, { idx: 0 })
+    //seg.neg.push(buf)
+
+    console.log('segs', seg)
     let fitline = new THREE.PlaneGeometry(0, 0)
     let feats = ['pos', 'neg']
     feats.forEach(function (label) {
@@ -872,6 +908,32 @@ const vlay = {
       csg.name = csg.geometry.name = label
 
       group.add(csg)
+    })
+
+    //
+
+    Object.keys(seg.emit).forEach(function (cloud) {
+      // parse points: static, dynamic
+      let clouds = seg.emit[cloud].flat()
+      const points = new Float32Array(clouds.length * 3)
+      for (let i = 0; i < clouds.length; i++) {
+        let v3 = clouds[i]
+        points.set([v3.x, v3.y, v3.z], i * 3)
+      }
+      // geometry
+      const pointCloud = new THREE.BufferGeometry()
+      pointCloud.setAttribute('position', new THREE.BufferAttribute(points, 3))
+      let particles = new THREE.Points(pointCloud, vlay.mat.emit)
+      particles.name = cloud
+      // parameters
+      let scale = cloud === 'static' ? 8 : 1
+      particles.scale.multiplyScalar(scale)
+
+      group.add(particles)
+
+      if (cloud === 'dynamic') {
+        vlay.v.particles = particles
+      }
     })
 
     // output
