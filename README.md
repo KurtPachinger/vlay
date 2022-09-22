@@ -1,2 +1,2 @@
-# vlay-gpr
-super displacement map
+# Vlay planet
+Generate a planet from a depth map or random seed. RGBA is raycast to fit estimate of: connected, pos/neg.
