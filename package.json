@@ -1,13 +1,19 @@
 {
-  "name": "vlay",
-  "version": "0.1.0",
-  "description": "voxel displacement map",
-  "keywords": ["voxel", "displace", "boxmap", "gpr", "graph cut", "point cloud"],
+  "name": "vlay-planet-r3f",
+  "version": "0.2.0",
+  "description": "Generate a planet from a depth map or random seed. RGBA is raycast to fit estimate of: connected, pos/neg.",
+  "keywords": [
+    "voxel",
+    "terrain",
+    "minecraft",
+    "procedural",
+    "map"
+  ],
   "main": "src/index.js",
   "dependencies": {
     "@react-three/csg": "1.1.5",
-    "@react-three/drei": "9.31.2",
-    "@react-three/fiber": "8.7.4",
+    "@react-three/drei": "9.32.0",
+    "@react-three/fiber": "8.8.1",
     "@types/three": "0.144.0",
     "manipulator3d": "0.0.8",
     "react": "18.2.0",
@@ -22,5 +28,10 @@
     "test": "react-scripts test --env=jsdom",
     "eject": "react-scripts eject"
   },
-  "browserslist": [">0.2%", "not dead", "not ie <= 11", "not op_mini all"]
+  "browserslist": [
+    ">0.2%",
+    "not dead",
+    "not ie <= 11",
+    "not op_mini all"
+  ]
 }
