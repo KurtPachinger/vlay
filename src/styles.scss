@@ -33,8 +33,7 @@ details {
   canvas {
     //background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIElEQVQYV2Nk+M/QwMDI0MAABYxgGkkQIoAkiBCACgIABm4HhEEa4PgAAAAASUVORK5CYII=");
     background-size: 3px 3px;
-    image-rendering: pixelated;
-    cursor: pointer;
+    
   }
   canvas,
   img {
@@ -43,8 +42,11 @@ details {
     height: $icon;
     margin: 0 $unit $unit 0;
     padding: $unit/4;
-    vertical-align: middle;
+    //vertical-align: middle;
+    // ux
     background-color: rgba(128, 128, 128, 0.5);
+    image-rendering: pixelated;
+    cursor: pointer;
 
     &:hover {
       background-color: #808080;
