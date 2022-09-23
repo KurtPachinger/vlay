@@ -449,36 +449,24 @@ const vlay = {
       vlay.gcut(opt)
     } else {
       // OUTPUT
-      //console.log('accumulate', opt.accumulate)
-
+      //console.log('rgba', opt.rgba)
       const pos = opt.env.getAttribute('position')
-
       // surface accumulate: length ~= ( positions - 1x circumference )
-      for (let i = 0; i < pos.count; i += 3) {
-        // triangle moment
-        let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3() }
-        m.tri.setFromAttributeAndIndices(pos, i, i + 1, i + 2)
-        m.tri.getMidpoint(m.mid)
+      for (let i = 0; i < opt.rgba.length; i++) {
+        let v3 = new THREE.Vector3()
+        v3.fromBufferAttribute(pos, i)
 
-        Object.keys(m.tri).forEach(function (corner, idx) {
-          let v3 = m.tri[corner]
-          if (isNaN(v3.length())) {
-            // merged vertice (last)
-            return
-          }
-          // lookup
-          let xyz = v3.toArray().join('_')
-          xyz = opt.rgba[xyz] || [1]
-          // transform accumulate
-          let avg = xyz.reduce((a, b) => a + b)
-          avg = avg / xyz.length
+        // lookup
+        let index = opt.rgba[i]
+        let avg = index.reduce((a, b) => a + b)
+        avg = avg / index.length
 
-          v3.multiplyScalar(2 + avg)
-          v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
+        // transform accumulate
+        v3.multiplyScalar(2 + avg)
+        v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
 
-          // ouput ( env, CSG... )
-          pos.setXYZ(i + idx, v3.x, v3.y, v3.z)
-        })
+        // ouput ( env, CSG... )
+        pos.setXYZ(i, v3.x, v3.y, v3.z)
       }
       opt.env.computeVertexNormals()
 
@@ -528,6 +516,7 @@ const vlay = {
     // contour defects (from boxmap)
     opt.geo.computeBoundingSphere()
     const ctr = opt.geo.boundingSphere.center
+    const idx = opt.geo.index.array
     const pos = opt.geo.getAttribute('position')
     let contour = opt.group.userData.contour
 
@@ -548,10 +537,10 @@ const vlay = {
       }
     }
 
-    for (let i = 0; i < pos.count; i += 3) {
-      // triangle moment
-      let m = { tri: new THREE.Triangle(), mid: new THREE.Vector3() }
-      m.tri.setFromAttributeAndIndices(pos, i, i + 1, i + 2)
+    for (let i = 0; i < idx.length; i += 3) {
+      // triangle moment 3x3
+      let m = { idx: { a: idx[i], b: idx[i + 1], c: idx[i + 2] }, tri: new THREE.Triangle(), mid: new THREE.Vector3() }
+      m.tri.setFromAttributeAndIndices(pos, m.idx.a, m.idx.b, m.idx.c)
       m.tri.getMidpoint(m.mid)
 
       // raycast boxmap (uv PYR)
@@ -573,22 +562,21 @@ const vlay = {
     function accumulate(m, d) {
       Object.keys(m.tri).forEach(function (corner) {
         if (m.rgba[3] === 0) {
-          // no zero-alpha multiplier
+          // no zero-alpha multiply
           return
         }
-        let v3 = m.tri[corner]
         // lookup
-        let xyz = v3.toArray().join('_')
-        let prev = opt.rgba[xyz]
+        let index = m.idx[corner]
+        let prev = opt.rgba[index]
         if (!prev) {
-          opt.rgba[xyz] = []
+          opt.rgba[index] = []
         }
 
-        // unique vertex or triangle moment
         if (!prev || isFinite(d)) {
-          // todo: use index as key?
-          opt.rgba[xyz].push(d || m.d)
+          //unique vertex
+          opt.rgba[index].push(d || m.d)
         } else {
+          //triangle moment
           accumulate(m, m.d)
         }
       })
