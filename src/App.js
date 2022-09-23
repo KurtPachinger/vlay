@@ -65,12 +65,16 @@ function CSG() {
   vlay.v.csg.neg = useRef()
   vlay.v.csg.geo = useRef()
 
+  // LOD (and mat.MAX) can qualify non-critical geometry/texture
+  //vlay.v.LOD = Math.round(Math.max(window.innerWidth, window.innerHeight) / 256)
+  vlay.v.LOD = 8
   let neg = new THREE.PlaneGeometry(0, 0)
-  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, 8)
+  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, vlay.v.LOD)
   geo = mergeVertices(geo)
   //
   geo.userData.pos = geo.getAttribute('position').clone()
 
+  // Difference, Intersection, Addition, Subtraction
   return (
     <Subtraction useGroups>
       <Brush a ref={vlay.v.csg.geo} geometry={geo} material={vlay.mat.pos} />
