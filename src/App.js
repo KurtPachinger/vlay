@@ -67,10 +67,11 @@ function CSG() {
 
   // LOD (and mat.MAX) can qualify non-critical geometry/texture
   vlay.v.LOD = Math.round(Math.max(window.innerWidth, window.innerHeight) / 256)
-  //vlay.v.LOD = 8
+  //vlay.v.LOD = 14
   let neg = new THREE.PlaneGeometry(0, 0)
-  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, vlay.v.LOD * 2)
-  geo = mergeVertices(geo, 2)
+  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, vlay.v.LOD * 3)
+  //let geo = new THREE.TorusKnotGeometry(vlay.v.R * 2, vlay.v.R / 2, vlay.v.LOD * 16, 16)
+  geo = mergeVertices(geo, 3)
   //
   geo.userData.pos = geo.getAttribute('position').clone()
 
