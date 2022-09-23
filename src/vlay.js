@@ -13,7 +13,7 @@ const vlay = {
     uid: {}
   },
   mat: {
-    MAX: 128,
+    MAX: 256,
     box: new THREE.BoxGeometry(R, R, R, 2, 2, 2),
     img: new THREE.MeshBasicMaterial({
       name: 'img',
@@ -433,10 +433,6 @@ const vlay = {
       opt.env.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.array.length), 3))
 
       // CUBEMAP
-      // max-resolution
-      let poly = opt.geo.index.count / (6 / 3)
-      let iter = Math.pow(2, Math.round(opt.i / 2)) * 8
-      vlay.mat.MAX = Math.min(poly, iter)
       if (opt.img || vlay.v.opt.uid) {
         vlay.mat.map = vlay.matgen(opt)
       }
@@ -779,7 +775,7 @@ const vlay = {
           // connected
           let closed = c.label === 'pos'
           const curve = new THREE.CatmullRomCurve3(c.point, closed, 'chordal')
-          buf = new THREE.TubeGeometry(curve, 24, vlay.v.R / 4, 5, closed)
+          buf = new THREE.TubeGeometry(curve, vlay.v.LOD * 6, vlay.v.R / 4, 5, closed)
         }
         // hull and sanitize
         align(geo, buf, c)
@@ -843,11 +839,11 @@ const vlay = {
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       let col = geo.getAttribute('color')
       // vertex color
-      const MAX = vlay.v.R * 4
+      const range = vlay.v.R * 4
       for (let i = 0; i < pos.count; i++) {
         let v3 = new THREE.Vector3()
         v3.fromBufferAttribute(pos, i)
-        let d = v3.clampLength(0, MAX).length() / MAX
+        let d = v3.clampLength(0, range).length() / range
         //d = vlay.util.num(d, { n: true })
         col.setXYZ(i, 1 - d, 0.25, d)
       }
@@ -928,8 +924,10 @@ const vlay = {
     let rnd
     if (!opt.img) {
       vlay.util.reset('genmap')
-      // ... name/canvas
-      rnd = seedmap(vlay.v.opt.seed, vlay.mat.MAX, 6)
+      // adaptive resolution
+      let iter = Math.pow(2, Math.round(opt.i / 2)) * 8
+      let exp = Math.min(iter, vlay.mat.MAX)
+      rnd = seedmap(vlay.v.opt.seed, exp, 6)
       vlay.v.uid[opt.uid] = rnd.seed
     }
 
