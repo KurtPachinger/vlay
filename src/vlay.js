@@ -106,7 +106,7 @@ const vlay = {
           let el = els[i]
           if (el.material) {
             if (el.material.length) {
-              el.material.forEach((cube)=> cube.map.dispose())
+              el.material.forEach((cube) => cube.map.dispose())
             } else {
               el.material.dispose()
             }
@@ -325,7 +325,7 @@ const vlay = {
               return Number(rand)
             }
 
-            let limit = 10_000
+            let limit = 15_000
             if (!vlay.v.demoS || vlay.v.demoS < timestamp) {
               vlay.v.demoS = timestamp + limit
               console.log('demo')
@@ -429,17 +429,15 @@ const vlay = {
       vlay.v.out.current.add(opt.group)
 
       // GEOMETRY
-      // csg
-      opt.group.userData.contour = {}
-      opt.rgba = []
-
       let geo = vlay.v.csg.geo.current.geometry
       geo.setAttribute('position', geo.userData.pos)
       opt.geo = geo
       // environment
       opt.env = geo.clone()
-
       opt.env.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.array.length), 3))
+
+      opt.depth = []
+      opt.group.userData.contour = {}
 
       // CUBEMAP
       if (opt.img || vlay.v.opt.uid) {
@@ -458,24 +456,28 @@ const vlay = {
       vlay.gcut(opt)
     } else {
       // OUTPUT
-      //console.log('rgba', opt.rgba)
+      //console.log('depth', opt.depth)
       const pos = opt.env.getAttribute('position')
       // surface accumulate: length ~= ( positions - 1x circumference )
-      for (let i = 0; i < opt.rgba.length; i++) {
+      for (let i = 0; i < opt.depth.length; i++) {
         let v3 = new THREE.Vector3()
         v3.fromBufferAttribute(pos, i)
 
         // lookup
-        let index = opt.rgba[i]
-        let avg = index.reduce((a, b) => a + b)
-        avg = avg / index.length
+        let index = opt.depth[i]
+        if (index) {
+          let avg = index.reduce((a, b) => a + b)
+          avg = avg / index.length
 
-        // transform accumulate
-        v3.multiplyScalar(2 + avg)
-        v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
+          // transform accumulate
+          v3.multiplyScalar(2 + avg)
+          v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
 
-        // ouput ( env, CSG... )
-        pos.setXYZ(i, v3.x, v3.y, v3.z)
+          // ouput ( env, CSG... )
+          pos.setXYZ(i, v3.x, v3.y, v3.z)
+        } else {
+          console.log('no geo index')
+        }
       }
       opt.env.computeVertexNormals()
 
@@ -495,7 +497,12 @@ const vlay = {
     }
   },
   morph: function (opt) {
-    //console.log('graphcut', opt)
+    //console.log('morph', opt)
+    opt.geo.computeBoundingSphere()
+    const ctr = opt.geo.boundingSphere.center
+    const idx = opt.geo.index.array
+    const pos = opt.geo.getAttribute('position')
+    const contour = opt.group.userData.contour
 
     // CUBEMAP (PYR)
     let blurs = []
@@ -510,39 +517,50 @@ const vlay = {
       blurs.push(blur)
     }
 
-    function pyr(intersect) {
-      // color from boxmap PYR uv
-      let uv = intersect.uv
-      let blur = blurs[intersect.face.materialIndex]
-      let ctx = blur.getContext('2d')
-      let rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
-      return rgba
-    }
-
     // RAYCAST
     const ray = new THREE.Raycaster()
     const dir = new THREE.Vector3()
-    // contour defects (from boxmap)
-    opt.geo.computeBoundingSphere()
-    const ctr = opt.geo.boundingSphere.center
-    const idx = opt.geo.index.array
-    const pos = opt.geo.getAttribute('position')
-    let contour = opt.group.userData.contour
+    function sample(m, origin, direction) {
+      // raycast boxmap
+      ray.set(origin, direction)
+      let intersects = ray.intersectObject(target, false)
+      if (intersects.length) {
+        let intersect = intersects[0]
+
+        // color from boxmap
+        const uv = intersect.uv
+        const blur = blurs[intersect.face.materialIndex]
+        const ctx = blur.getContext('2d')
+        const rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
+
+        if (m.attr) {
+          // vertex color
+          m.attr.setXYZ(m.idx, rgba[0] / 255, rgba[1] / 255, rgba[2] / 255)
+        } else {
+          // rgba multiple (50% grey is 1)
+          m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
+          m.d = vlay.util.num(m.d, { n: true })
+
+          if (rgba[3] !== 0) {
+            // vertex depth
+            accumulate(m)
+          }
+          if (m.moment) {
+            // defects
+            moment(m, intersect)
+          }
+        }
+      }
+    }
 
     if (opt.i === 1) {
-      // low-res PYR
+      // vertex color from low-res
+      let m = { idx: 0, attr: opt.env.getAttribute('color') }
       let v3 = new THREE.Vector3()
-      const col = opt.env.getAttribute('color')
-      // vertex color
       for (let i = 0; i < pos.count; i++) {
         v3.fromBufferAttribute(pos, i)
-        ray.set(ctr, dir.subVectors(v3, ctr).normalize())
-        const intersects = ray.intersectObject(target, false)
-        if (intersects.length) {
-          let intersect = intersects[0]
-          let rgba = pyr(intersect)
-          col.setXYZ(i, rgba[0] / 255, rgba[1] / 255, rgba[2] / 255)
-        }
+        m.idx = i
+        sample(m, ctr, dir.subVectors(v3, ctr).normalize())
       }
     }
 
@@ -552,40 +570,28 @@ const vlay = {
       m.tri.setFromAttributeAndIndices(pos, m.idx.a, m.idx.b, m.idx.c)
       m.tri.getMidpoint(m.mid)
 
-      // raycast boxmap (uv PYR)
-      ray.set(ctr, dir.subVectors(m.mid, ctr).normalize())
-      const intersects = ray.intersectObject(target, false)
-      if (intersects.length) {
-        let intersect = intersects[0]
-        m.rgba = pyr(intersect)
-        // rgba multiple (50% grey is 1)
-        m.d = (m.rgba[0] + m.rgba[1] + m.rgba[2]) / 3 / 127.5
-        //m.d += 0.5
-
-        // accumulate transformers
-        accumulate(m)
-        moment(m, intersect)
-      }
+      // ray from normal
+      m.tri.getNormal(dir)
+      sample(m, m.mid, dir)
+      // ray from center
+      m.moment = true
+      sample(m, ctr, dir.subVectors(m.mid, ctr).normalize())
     }
 
     function accumulate(m, d) {
       Object.keys(m.tri).forEach(function (corner) {
-        if (m.rgba[3] === 0) {
-          // no zero-alpha multiply
-          return
-        }
         // lookup
         let index = m.idx[corner]
-        let prev = opt.rgba[index]
-        if (!prev) {
-          opt.rgba[index] = []
-        }
+        let prev = opt.depth[index]
 
         if (!prev || isFinite(d)) {
-          //unique vertex
-          opt.rgba[index].push(d || m.d)
+          if (!prev) {
+            opt.depth[index] = []
+          }
+          // unique vertex
+          opt.depth[index].push(d || m.d)
         } else {
-          //triangle moment
+          // propagate depth to triangle
           accumulate(m, m.d)
         }
       })
