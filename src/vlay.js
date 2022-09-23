@@ -104,12 +104,21 @@ const vlay = {
         let els = sel.children
         for (let i in els) {
           let el = els[i]
-          if (el.name === 'box') {
-            el.material.forEach(function (cubeface) {
-              cubeface.map.dispose()
-            })
-          } else if (el.name === 'neg' || el.name === 'pos') {
+          if (el.material) {
+            if (el.material.length) {
+              el.material.forEach((cube)=> cube.map.dispose())
+            } else {
+              el.material.dispose()
+            }
+          }
+          if (el.geometry) {
             el.geometry.dispose()
+          }
+          if (el.children && el.children.length) {
+            el.children.forEach(function (child) {
+              child.geometry.dispose()
+              child.material.dispose()
+            })
           }
           sel.remove(el)
         }
@@ -837,11 +846,7 @@ const vlay = {
       }
     }
 
-    // testing tertiary CSG
-    //let ball = new THREE.TetrahedronGeometry(vlay.v.R * 1, 1)
-    //let buf = align(seg.neg, ball, { idx: 0 })
-    //seg.neg.push(buf)
-
+    // extras: LOD, align(seg.pos, g, {idx:0}) ...
     console.log('segs', seg)
     let fitline = new THREE.PlaneGeometry(0, 0)
     let feats = ['pos', 'neg']
@@ -849,6 +854,7 @@ const vlay = {
       // cavities buffer geometry to mesh
       let merge
       let geo = seg[label].flat()
+
       if (geo.length) {
         // same attributes required (csg/buffer)
         merge = mergeBufferGeometries(geo)
@@ -856,22 +862,22 @@ const vlay = {
           merge = fitline
         }
         merge.userData = { segs: geo.length }
-        // align(c) would permit label-specific attributes...
+
         color(merge)
         merge.computeVertexNormals()
       }
 
-      let csg = new THREE.Mesh(merge, vlay.mat[label])
+      let feat = new THREE.Mesh(merge, vlay.mat[label])
       // attributes
       if (label === 'pos') {
-        csg.castShadow = csg.receiveShadow = true
+        feat.castShadow = feat.receiveShadow = true
       } else if (label === 'neg') {
-        vlay.v.csg[label].current.geometry = csg.geometry
+        vlay.v.csg[label].current.geometry = feat.geometry
       }
 
-      csg.name = csg.geometry.name = label
+      feat.name = feat.geometry.name = label
 
-      group.add(csg)
+      group.add(feat)
     })
 
     //
