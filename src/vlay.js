@@ -40,9 +40,9 @@ const vlay = {
       shininess: 60
     }),
     emit: new THREE.PointsMaterial({
-      size: 3,
+      size: 2,
       color: 0xffffff,
-      opacity: 0.5,
+      opacity: 0.33,
       transparent: true
     }),
     xyz: [
@@ -772,34 +772,14 @@ const vlay = {
         let d = unit(i)
         if (c.system > 1) {
           // not connected
-          if (c.label === 'neg') {
-            //d *= c.forms * 2
-          }
           buf = new THREE.TetrahedronGeometry(d, 1)
           let pt = c.point[i]
-          // params
           buf.translate(pt.x, pt.y, pt.z)
-          //
-          //
-          // pointsMaterial (rain, constellation)
         } else {
           // connected
-          const curve = new THREE.CatmullRomCurve3(c.point)
-          // params
-          const extrude = {
-            steps: maxSegs * 2,
-            bevelEnabled: false,
-            extrudePath: curve
-          }
-          const pts = [],
-            cnt = 3
-
-          for (let i = 0; i < cnt; i++) {
-            const a = ((2 * i) / cnt) * Math.PI
-            pts.push(new THREE.Vector2(Math.cos(a) * d, Math.sin(a) * d))
-          }
-          const ellipsoid = new THREE.Shape(pts)
-          buf = new THREE.ExtrudeGeometry(ellipsoid, extrude)
+          let closed = c.label === 'pos'
+          const curve = new THREE.CatmullRomCurve3(c.point, closed, 'chordal')
+          buf = new THREE.TubeGeometry(curve, 24, vlay.v.R / 4, 5, closed)
         }
         // hull and sanitize
         align(geo, buf, c)
