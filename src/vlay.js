@@ -407,7 +407,7 @@ const vlay = {
     }
   },
   gcut: async function (opt = {}) {
-    console.log('gcut', opt.i)
+    console.log('gcut')
 
     if (!opt.init) {
       //let test = await vlay.v.state.performance.regress()
@@ -428,17 +428,6 @@ const vlay = {
       opt.group.name = opt.uid
       vlay.v.out.current.add(opt.group)
 
-      // GEOMETRY
-      let geo = vlay.v.csg.geo.current.geometry
-      geo.setAttribute('position', geo.userData.pos)
-      opt.geo = geo
-      // environment
-      opt.env = geo.clone()
-      opt.env.setAttribute('color', new THREE.BufferAttribute(new Float32Array(geo.attributes.position.array.length), 3))
-
-      opt.depth = []
-      opt.group.userData.contour = {}
-
       // CUBEMAP
       if (opt.img || vlay.v.opt.uid) {
         vlay.mat.map = vlay.matgen(opt)
@@ -447,6 +436,16 @@ const vlay = {
       box.name = 'box'
       box.renderOrder = 2
       opt.group.add(box)
+
+      // GEOMETRY
+      opt.geo = vlay.v.csg.geo.current.geometry
+      opt.geo.setAttribute('position', opt.geo.userData.pos)
+      opt.env = opt.geo.clone()
+      opt.env.setAttribute('color', new THREE.BufferAttribute(new Float32Array(opt.geo.attributes.position.array.length), 3))
+
+      // ACCUMULATE
+      opt.accum = []
+      opt.contour = {}
     }
 
     if (opt.i > 0) {
@@ -456,22 +455,21 @@ const vlay = {
       vlay.gcut(opt)
     } else {
       // OUTPUT
-      //console.log('depth', opt.depth)
+      //console.log('accum', opt.accum)
       const pos = opt.env.getAttribute('position')
       // surface accumulate: length ~= ( positions - 1x circumference )
-      for (let i = 0; i < opt.depth.length; i++) {
+      for (let i = 0; i < opt.accum.length; i++) {
         let v3 = new THREE.Vector3()
         v3.fromBufferAttribute(pos, i)
 
         // lookup
-        let index = opt.depth[i]
+        let index = opt.accum[i]
         if (index) {
-          let avg = index.reduce((a, b) => a + b)
-          avg = avg / index.length
-
           // transform accumulate
-          v3.multiplyScalar(2 + avg)
-          v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
+          //v3.multiplyScalar(2 + index.dist)
+          //v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
+
+          v3.lerp(index.point, index.dist)
 
           // ouput ( env, CSG... )
           pos.setXYZ(i, v3.x, v3.y, v3.z)
@@ -488,23 +486,22 @@ const vlay = {
       opt.group.add(env)
 
       // env defects (pos/neg)
-      opt.group = await vlay.segs(opt.group)
-
-      // update r3f
-      vlay.v.csg.geo.current.userData.update = true
-      vlay.v.state?.invalidate()
+      vlay.segs(opt)
       vlay.v.opt._preset?.setValue(vlay.v.opt.view)
     }
   },
   morph: function (opt) {
     //console.log('morph', opt)
+    // targets
     opt.geo.computeBoundingSphere()
     const ctr = opt.geo.boundingSphere.center
+    const ray = new THREE.Raycaster()
+    const dir = new THREE.Vector3()
+    // positions
     const idx = opt.geo.index.array
     const pos = opt.geo.getAttribute('position')
-    const contour = opt.group.userData.contour
 
-    // CUBEMAP (PYR)
+    // CUBEMAP PYR
     let blurs = []
     let k = 1 - (opt.i - 1) / vlay.v.opt.iter
     let target = opt.group.getObjectByName('box')
@@ -517,44 +514,81 @@ const vlay = {
       blurs.push(blur)
     }
 
-    // RAYCAST
-    const ray = new THREE.Raycaster()
-    const dir = new THREE.Vector3()
     function sample(m, origin, direction) {
-      // raycast boxmap
+      // raycast cubemap
       ray.set(origin, direction)
       let intersects = ray.intersectObject(target, false)
       if (intersects.length) {
         let intersect = intersects[0]
-
-        // color from boxmap
+        // cubemap sample
         const uv = intersect.uv
         const blur = blurs[intersect.face.materialIndex]
         const ctx = blur.getContext('2d')
         const rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
 
-        if (m.attr) {
-          // vertex color
-          m.attr.setXYZ(m.idx, rgba[0] / 255, rgba[1] / 255, rgba[2] / 255)
-        } else {
-          // rgba multiple (50% grey is 1)
-          m.d = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
-          m.d = vlay.util.num(m.d, { n: true })
+        if (rgba[3] !== 0) {
+          if (m.attr) {
+            // set color
+            m.attr.setXYZ(m.idx, rgba[0] / 255, rgba[1] / 255, rgba[2] / 255)
+          } else {
+            // accumulate depth (50% grey = 1)
+            m.dist = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
 
-          if (rgba[3] !== 0) {
-            // vertex depth
-            accumulate(m)
-          }
-          if (m.moment) {
-            // defects
-            moment(m, intersect)
+            // original geometry
+            depth(m, intersect.point)
+            if (m.moment) {
+              // positive or negative segments
+              moment(m, intersect.faceIndex)
+            }
           }
         }
       }
     }
 
-    if (opt.i === 1) {
-      // vertex color from low-res
+    function movingAverage(n, val, avg) {
+      if (typeof val !== 'number') {
+        Object.keys(val).forEach(function (axis) {
+          avg[axis] = avg[axis] + (val[axis] - avg[axis]) / (n + 1)
+        })
+      } else {
+        avg = avg + (val - avg) / (n + 1)
+      }
+      return avg
+    }
+    function depth(m, point) {
+      // vertex depth (moving average)
+      Object.keys(m.tri).forEach(function (corner) {
+        let index = m.idx[corner]
+        let accum = opt.accum[index]
+        if (!accum) {
+          accum = opt.accum[index] = { n: 0, dist: 0, point: point }
+        }
+
+        // distance
+        accum.dist = movingAverage(accum.n, m.dist, accum.dist)
+        // location
+        accum.point = movingAverage(accum.n, point, accum.point)
+        // index
+        accum.n++
+      })
+    }
+
+    function moment(m, faceIndex) {
+      m.dist = vlay.util.num(m.dist, { n: true })
+      // face defects
+      let center = [vlay.util.num(m.mid.x), vlay.util.num(m.mid.y), vlay.util.num(m.mid.z)].join(',')
+      let label = m.dist >= 0.75 ? 'pos' : 'neg'
+      let defect = [m.dist, center, label].join('|')
+
+      if (opt.contour[faceIndex] === undefined) {
+        opt.contour[faceIndex] = []
+      }
+      opt.contour[faceIndex].push(defect)
+    }
+
+    // VERTEX COLOR
+    if (opt.i === Math.ceil(vlay.v.opt.iter / 2)) {
+      // from half-res
       let m = { idx: 0, attr: opt.env.getAttribute('color') }
       let v3 = new THREE.Vector3()
       for (let i = 0; i < pos.count; i++) {
@@ -564,79 +598,38 @@ const vlay = {
       }
     }
 
+    // TRIANGLE SAMPLE
     for (let i = 0; i < idx.length; i += 3) {
-      // triangle moment 3x3
+      // accumulate depth and moment
       let m = { idx: { a: idx[i], b: idx[i + 1], c: idx[i + 2] }, tri: new THREE.Triangle(), mid: new THREE.Vector3() }
       m.tri.setFromAttributeAndIndices(pos, m.idx.a, m.idx.b, m.idx.c)
       m.tri.getMidpoint(m.mid)
 
-      // ray from normal
+      // from normal
       m.tri.getNormal(dir)
       sample(m, m.mid, dir)
-      // ray from center
+      // from center
       m.moment = true
       sample(m, ctr, dir.subVectors(m.mid, ctr).normalize())
-    }
-
-    function accumulate(m, d) {
-      Object.keys(m.tri).forEach(function (corner) {
-        // lookup
-        let index = m.idx[corner]
-        let prev = opt.depth[index]
-
-        if (!prev || isFinite(d)) {
-          if (!prev) {
-            opt.depth[index] = []
-          }
-          // unique vertex
-          opt.depth[index].push(d || m.d)
-        } else {
-          // propagate depth to triangle
-          accumulate(m, m.d)
-        }
-      })
-    }
-
-    function moment(m, intersect) {
-      // BVH-CSG cavities, face-wise pos/neg
-      let face = vlay.util.num(intersect.faceIndex, { fix: 0, pre: 'f' })
-      let dist = vlay.util.num(m.d)
-      //let iter = 'iter_' + opt.i
-      let xyz = [vlay.util.num(m.mid.x), vlay.util.num(m.mid.y), vlay.util.num(m.mid.z)].join(',')
-      // output meta
-      let defect = [dist, xyz].join('|')
-
-      // defect tolerance, local sample
-      // ...not relative to layer(s) global distance
-      if (contour[face] === undefined) {
-        contour[face] = []
-      }
-
-      if (dist > 0.9) {
-        contour[face].push(defect + '|pos')
-      } else if (dist < 0.6) {
-        contour[face].push(defect + '|neg')
-      }
     }
 
     // cleanup
     vlay.util.reset(blurs)
     return opt.geo
   },
-  segs: function (group) {
+  segs: function (opt) {
     // fit roi contour to landmark type
     let seg = {
-      pos: [],
-      neg: [],
       cluster: { c: 0, pos: 0, neg: 0 },
       contour: [],
+      buff: { pos: [], neg: [] },
       emit: { static: [], dynamic: [] }
     }
 
     const maxSegs = 8
-    Object.keys(group.userData.contour).forEach(function (face) {
+    Object.keys(opt.contour).forEach(function (face) {
       // de-dupe, minimum, sort distance
-      let defects = [...new Set(group.userData.contour[face])]
+      let defects = [...new Set(opt.contour[face])]
       if (defects.length < 3) {
         return
       }
@@ -669,9 +662,9 @@ const vlay = {
       let defects = seg.contour[i]
 
       let c = { depth: [], point: [], label: 0, forms: 0 }
-      for (let i = 0; i < defects.length; i++) {
+      for (let j = 0; j < defects.length; j++) {
         // 'dist|p|x,y,z|type'
-        const defect = defects[i].split('|')
+        const defect = defects[j].split('|')
 
         // color
         let depth = vlay.util.num(defect[0], { n: true })
@@ -778,13 +771,13 @@ const vlay = {
           // connected
           let closed = c.label === 'pos'
           const curve = new THREE.CatmullRomCurve3(c.point, closed, 'chordal')
-          buf = new THREE.TubeGeometry(curve, vlay.v.LOD * 6, vlay.v.R / 4, 5, closed)
+          buf = new THREE.TubeGeometry(curve, vlay.v.LOD * 8, vlay.v.R / 4, 5, closed)
         }
         // hull and sanitize
         align(geo, buf, c)
       }
       // defects to merge
-      seg[c.label].push(geo)
+      seg.buff[c.label].push(geo)
     }
 
     function align(geo, buf, c) {
@@ -835,13 +828,12 @@ const vlay = {
       return buf
     }
 
-    function color(geo, c) {
+    function wrap(geo, c) {
+      // make attributes conform (post-align)
       let pos = geo.getAttribute('position')
-      // CSG needs uv
-      geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       let col = geo.getAttribute('color')
-      // vertex color
+      // vertex color from depth
       const range = vlay.v.R * 4
       for (let i = 0; i < pos.count; i++) {
         let v3 = new THREE.Vector3()
@@ -850,43 +842,32 @@ const vlay = {
         //d = vlay.util.num(d, { n: true })
         col.setXYZ(i, 1 - d, 0.25, d)
       }
+      // CSG needs uv
+      geo.computeVertexNormals()
+      geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
     }
 
-    // extras: LOD, align(seg.pos, g, {idx:0}) ...
+    // output
     console.log('segs', seg)
     let fitline = new THREE.PlaneGeometry(0, 0)
-    let feats = ['pos', 'neg']
-    feats.forEach(function (label) {
-      // cavities buffer geometry to mesh
-      let merge
-      let geo = seg[label].flat()
+    Object.entries(seg.buff).forEach(function ([label, geo]) {
+      // mesh (...LOD, etc.)
+      let merge = geo.length ? mergeBufferGeometries(geo.flat()) : fitline
+      let feat = new THREE.Mesh(merge || fitline, vlay.mat[label])
 
-      if (geo.length) {
-        // same attributes required (csg/buffer)
-        merge = mergeBufferGeometries(geo)
-        if (merge === null) {
-          merge = fitline
-        }
-        merge.userData = { segs: geo.length }
-
-        color(merge)
-        merge.computeVertexNormals()
-      }
-
-      let feat = new THREE.Mesh(merge, vlay.mat[label])
       // attributes
-      if (label === 'pos') {
-        feat.castShadow = feat.receiveShadow = true
-      } else if (label === 'neg') {
-        vlay.v.csg[label].current.geometry = feat.geometry
-      }
-
+      wrap(feat.geometry)
+      feat.geometry.userData = { segs: geo.length }
       feat.name = feat.geometry.name = label
 
-      group.add(feat)
-    })
+      if (label === 'neg') {
+        vlay.v.csg[label].current.geometry = feat.geometry
+      } else {
+        feat.castShadow = feat.receiveShadow = true
+      }
 
-    //
+      opt.group.add(feat)
+    })
 
     Object.keys(seg.emit).forEach(function (cloud) {
       // parse points: static, dynamic
@@ -905,7 +886,7 @@ const vlay = {
       let scale = cloud === 'static' ? 8 : 1
       particles.scale.multiplyScalar(scale)
 
-      group.add(particles)
+      opt.group.add(particles)
 
       if (cloud === 'dynamic') {
         vlay.v.particles = particles
@@ -913,8 +894,10 @@ const vlay = {
     })
 
     // output
-    group.userData = { seg: seg.cluster }
-    return group
+    opt.group.userData = { seg: seg.cluster }
+    // update r3f
+    vlay.v.csg.update = true
+    vlay.v.state?.invalidate()
   },
   matgen: function (opt) {
     let cubemap = []
