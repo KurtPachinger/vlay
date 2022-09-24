@@ -51,13 +51,13 @@ export default function App() {
 function CSG() {
   //docs.pmnd.rs/react-three-fiber/api/events
   useFrame((state) => {
-    const geom = vlay.v.csg.geo.current
-    if (geom && geom.userData.update) {
+    if (vlay.v.csg.update) {
       console.log('r3f', state.gl.info)
-      geom.userData.update = false
+      vlay.v.csg.update = false
       // invalidate stale mutated
+      const geom = vlay.v.csg.geo.current
       geom.geometry.computeVertexNormals()
-      geom.needsUpdate = true
+      //geom.needsUpdate = true
     }
   })
 
@@ -69,14 +69,14 @@ function CSG() {
   vlay.v.LOD = Math.round(Math.max(window.innerWidth, window.innerHeight) / 256)
   //vlay.v.LOD = 14
   let neg = new THREE.PlaneGeometry(0, 0)
-  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, vlay.v.LOD * 3)
-  //let geo = new THREE.TorusKnotGeometry(vlay.v.R * 2, vlay.v.R / 2, vlay.v.LOD * 16, 16)
-  geo = mergeVertices(geo, 3)
+  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, vlay.v.LOD * 4)
+  //let geo = new THREE.TorusKnotGeometry(vlay.v.R * 2, vlay.v.R / 2, vlay.v.LOD * 32, 32)
+  geo = mergeVertices(geo, vlay.v.R / 4)
   //
   geo.userData.pos = geo.getAttribute('position').clone()
 
-  // Difference, Intersection, Addition, Subtraction
   return (
+    // Difference, Intersection, Addition, Subtraction
     <Subtraction useGroups>
       <Brush a ref={vlay.v.csg.geo} geometry={geo} material={vlay.mat.pos} />
       <Brush b ref={vlay.v.csg.neg} geometry={neg} material={vlay.mat.neg} />
