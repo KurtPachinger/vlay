@@ -60,7 +60,7 @@ function CSG() {
       // invalidate stale mutated
       const geom = vlay.v.csg.geo.current
       geom.geometry.computeVertexNormals()
-      //geom.needsUpdate = true
+      geom.needsUpdate = true
     }
   })
 
