@@ -8,6 +8,9 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, MeshReflectorMaterial } from '@react-three/drei'
 import { Brush, Subtraction } from '@react-three/csg'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { TeapotGeometry } from 'three/examples/jsm/geometries/TeapotGeometry.js'
+
+//
 
 export default function App() {
   // output, positive defects
@@ -66,12 +69,15 @@ function CSG() {
   vlay.v.csg.geo = useRef()
 
   // LOD (and mat.MAX) can qualify non-critical geometry/texture
-  vlay.v.LOD = Math.round(Math.max(window.innerWidth, window.innerHeight) / 256)
+  vlay.v.LOD = Math.round(Math.min(window.innerWidth, window.innerHeight) / 256)
   //vlay.v.LOD = 14
   let neg = new THREE.PlaneGeometry(0, 0)
   let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, vlay.v.LOD * 4)
   //let geo = new THREE.TorusKnotGeometry(vlay.v.R * 2, vlay.v.R / 2, vlay.v.LOD * 32, 32)
+  //let geo = new TeapotGeometry(vlay.v.R * 2, vlay.v.LOD * 4)
+
   geo = mergeVertices(geo, vlay.v.R / 4)
+
   //
   geo.userData.pos = geo.getAttribute('position').clone()
 
