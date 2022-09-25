@@ -1,6 +1,7 @@
 # vlay
-Generate a planet from a depth map or random seed. RGBA is raycast to fit estimate of: connected, pos/neg. Infer feature class, weight, relation, and system connectivity.
+3d object projects geometric systems it infers from texture raycast. The result is a verifiable blend, firmly seeded in local space. Generative details may be reproduced from a small key, motion texture, or any practial resource. Applications range from fantasy terrain to atmospheric effects.
 
 ## texture to terrain
-- shovel-ready WIP ⛏️
-- Indiana Joneshovel-Ready 🚧
+- generate volumetric environment, secondary detail, meta blend
+- fit weighted estimate of: positive/negative, connected system
+
