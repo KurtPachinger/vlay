@@ -1,10 +1,11 @@
 const seedmap = function (seed, size = 64, qty = 1) {
   // params
+  size = Math.floor(size)
   let k = {
     map: [],
     max: size / 4,
     min: Math.max(4, size / 128),
-    dat: { pos: 0, neg: 0 }
+    dat: { pos: 0, neg: 0, time: performance.now() }
   }
 
   function gen(seed, uei = 1) {
@@ -100,8 +101,10 @@ const seedmap = function (seed, size = 64, qty = 1) {
     let pair = k.map[i]
     let base = pair.minor.getContext('2d')
     base.drawImage(pair.major, 0, 0, size, size)
+    pair.major = null
     k.map[i] = pair.minor
   }
+  k.dat.time = performance.now() - k.dat.time
   console.log('noise', k)
   return k
 }
