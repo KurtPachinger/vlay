@@ -79,11 +79,12 @@ const vlay = {
     num: function (num, o = {}) {
       o.pre = o.pre || (num < 0 ? '-' : '+')
       o.pad = o.pad >= 0 ? o.pad : 3
-      o.fix = o.fix >= 0 ? o.fix : 3
+      o.fix = o.fix >= 0 ? o.fix : 8
+      //o.n = o.n || true
       // format
       let n = Number(Math.abs(num))
       n = o.pre + String(n.toFixed(o.fix)).padStart(o.pad + o.fix + 1, '0')
-      if (o.n) {
+      if (!o.s) {
         n = parseFloat(n)
       }
       return n
@@ -321,7 +322,7 @@ const vlay = {
             // settings
             const R = vlay.v.R * 8
             function rand(value) {
-              let rand = (value * Math.random()).toFixed(3)
+              let rand = vlay.util.num(value * Math.random())
               return Number(rand)
             }
 
@@ -455,23 +456,18 @@ const vlay = {
       vlay.gcut(opt)
     } else {
       // OUTPUT
-      //console.log('accum', opt.accum)
+
       const pos = opt.env.getAttribute('position')
-      // surface accumulate: length ~= ( positions - 1x circumference )
       for (let i = 0; i < opt.accum.length; i++) {
+        // transform mesh surface from accumulate
+        // length ~= ( positions - 1x circumference )
         let v3 = new THREE.Vector3()
         v3.fromBufferAttribute(pos, i)
 
-        // lookup
-        let index = opt.accum[i]
-        if (index) {
-          // transform accumulate
-          //v3.multiplyScalar(2 + index.dist)
-          //v3.lerp(new THREE.Vector3(0, 0, 0), 0.5)
-
-          v3.lerp(index.point, index.dist)
-
-          // ouput ( env, CSG... )
+        let range = opt.accum[i]
+        if (range) {
+          // average
+          v3.lerp(range.point, range.scale)
           pos.setXYZ(i, v3.x, v3.y, v3.z)
         } else {
           console.log('no geo index')
@@ -531,13 +527,10 @@ const vlay = {
             // set color
             m.attr.setXYZ(m.idx, rgba[0] / 255, rgba[1] / 255, rgba[2] / 255)
           } else {
-            // accumulate depth (50% grey = 1)
-            m.dist = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
-
-            // original geometry
-            depth(m, intersect.point)
+            // accumulate defects (50% grey = 1)
+            m.scale = (rgba[0] + rgba[1] + rgba[2]) / 3 / 127.5
+            scale(m, intersect.point)
             if (m.moment) {
-              // positive or negative segments
               moment(m, intersect.faceIndex)
             }
           }
@@ -545,7 +538,8 @@ const vlay = {
       }
     }
 
-    function movingAverage(n, val, avg) {
+    function avg(n, val, avg) {
+      // moving average
       if (typeof val !== 'number') {
         Object.keys(val).forEach(function (axis) {
           avg[axis] = avg[axis] + (val[axis] - avg[axis]) / (n + 1)
@@ -555,30 +549,33 @@ const vlay = {
       }
       return avg
     }
-    function depth(m, point) {
-      // vertex depth (moving average)
+    function scale(m, point) {
+      // accumulate for mesh transform
       Object.keys(m.tri).forEach(function (corner) {
         let index = m.idx[corner]
         let accum = opt.accum[index]
         if (!accum) {
-          accum = opt.accum[index] = { n: 0, dist: 0, point: point }
+          accum = opt.accum[index] = { n: 0, scale: m.scale, point: point }
         }
 
-        // distance
-        accum.dist = movingAverage(accum.n, m.dist, accum.dist)
-        // location
-        accum.point = movingAverage(accum.n, point, accum.point)
-        // index
+        accum.scale = avg(accum.n, m.scale, accum.scale)
+        accum.point = avg(accum.n, point, accum.point)
         accum.n++
       })
     }
 
     function moment(m, faceIndex) {
-      m.dist = vlay.util.num(m.dist, { n: true })
-      // face defects
+      // positive or negative segments
       let center = [vlay.util.num(m.mid.x), vlay.util.num(m.mid.y), vlay.util.num(m.mid.z)].join(',')
-      let label = m.dist >= 0.75 ? 'pos' : 'neg'
-      let defect = [m.dist, center, label].join('|')
+      // bias median (1) of range (2-0) towards geo surface
+      let label = 'med'
+      if (m.scale > 0.66) {
+        label = 'pos'
+      } else if (m.scale < 0.33) {
+        label = 'neg'
+      }
+      let scaleSort = vlay.util.num(m.scale, { s: true, pad: 1 })
+      let defect = [scaleSort, center, label].join('|')
 
       if (opt.contour[faceIndex] === undefined) {
         opt.contour[faceIndex] = []
@@ -600,7 +597,7 @@ const vlay = {
 
     // TRIANGLE SAMPLE
     for (let i = 0; i < idx.length; i += 3) {
-      // accumulate depth and moment
+      // accumulate range and moment
       let m = { idx: { a: idx[i], b: idx[i + 1], c: idx[i + 2] }, tri: new THREE.Triangle(), mid: new THREE.Vector3() }
       m.tri.setFromAttributeAndIndices(pos, m.idx.a, m.idx.b, m.idx.c)
       m.tri.getMidpoint(m.mid)
@@ -620,7 +617,7 @@ const vlay = {
   segs: function (opt) {
     // fit roi contour to landmark type
     let seg = {
-      cluster: { c: 0, pos: 0, neg: 0 },
+      count: { range: 0, pos: 0, neg: 0, med: 0 },
       contour: [],
       buff: { pos: [], neg: [] },
       emit: { static: [], dynamic: [] }
@@ -628,7 +625,7 @@ const vlay = {
 
     const maxSegs = 8
     Object.keys(opt.contour).forEach(function (face) {
-      // de-dupe, minimum, sort distance
+      // de-dupe, minimum, sort range
       let defects = [...new Set(opt.contour[face])]
       if (defects.length < 3) {
         return
@@ -641,76 +638,80 @@ const vlay = {
       for (let i = 0; i < defects.length; i += delta) {
         let defect = defects[i]
         segs.push(defect)
-        // label cluster
+        // preliminary poll
         let label = defect.slice(defect.lastIndexOf('|') + 1)
-        seg.cluster[label]++
-        seg.cluster.c++
+        if (seg.count[label] === undefined) {
+          seg.count[label] = 0
+        }
+        seg.count[label]++
       }
+
+      seg.count.range++
       seg.contour.push(segs)
     })
-    // weight rank
     seg.contour.sort().reverse()
-    seg.cluster.c = Number((seg.cluster.pos / seg.cluster.c).toFixed(3))
-    if (!isFinite(seg.cluster.c)) {
-      // no contours
-      seg.cluster.c = 0.5
-    }
+    // overall weight/rank
+    const set = seg.count.pos + seg.count.neg || seg.count.med
+    seg.count.range = set === 0 ? 0.5 : seg.count.pos / set
 
     // classification
     //console.log('contour', seg.contour)
     for (let i = 0; i < seg.contour.length; i++) {
       let defects = seg.contour[i]
 
-      let c = { depth: [], point: [], label: 0, forms: 0 }
+      let c = { range: [], point: [], label: 'med', scale: 0 }
+      let count = { pos: 0, neg: 0, med: 0 }
       for (let j = 0; j < defects.length; j++) {
-        // 'dist|p|x,y,z|type'
+        // 'range|p|x,y,z|type'
         const defect = defects[j].split('|')
 
-        // color
-        let depth = vlay.util.num(defect[0], { n: true })
-        c.depth.push(depth)
-        c.forms += depth
+        // weight/rank
+        let range = vlay.util.num(defect[0])
+        c.range.push(range)
+        c.scale += Math.abs(1 - range)
 
         // position (path/geometry)
         let point = defect[1]
         point = point.split(',')
-        point = new THREE.Vector3(
-          vlay.util.num(point[0], { n: true }),
-          vlay.util.num(point[1], { n: true }),
-          vlay.util.num(point[2], { n: true })
-        )
+        point = new THREE.Vector3(point[0], point[1], point[2])
         c.point.push(point)
 
-        // weight
+        // adjusted weight/rank
         const label = defect[defect.length - 1]
-        if (label === 'pos') {
-          c.label++
-        }
+
+        count[label]++
       }
 
-      // weight rank (like d3 range/domain/scale)
-      let depth = c.forms / defects.length
-      let weight = c.label / defects.length
-      weight = weight / seg.cluster.c || 0.5
-      c.forms = vlay.util.num(Math.abs(1 - depth) + weight, { n: true })
-      c.label = c.forms >= 1.5 ? 'pos' : 'neg'
+      // weight rank (like d3 range/domain/scale) for segment/type
+      const set = count.pos + count.neg || count.med
+      const scale = c.scale / defects.length // 1-0, (high #fff > low #000), incl median
+      const bias = set === 0 ? 0.5 : Math.abs(set / 2 - count.pos) / (set / 2) // 1-0, deviance from median range
+      c.scale = vlay.util.num(scale + bias) // 2-0 ()
+      let drift = set === 0 ? 0.5 : count.pos / set // 1-0, (pos > mixed)
+      drift = Math.abs(drift - seg.count.range) // 1-0, (adjusted)
+      if (drift >= 1 / 64 && drift !== seg.count.range) {
+        c.label = count.pos >= count.neg ? 'pos' : 'neg'
+      }
 
-      //console.log('c', c)
+      console.log('-', c, c.scale, drift)
       profile(c)
     }
 
     function profile(c) {
-      // feature
-      let poi = c.forms > 3 || c.forms < 0.25 // 4-1-0
-      // process
-      let dif = c.depth[0] / c.depth[c.depth.length - 1]
+      // feature (2-0)
+      let poi = c.scale > 1.33 // 2-0
+      // process ()
+      let dif = c.range[0] / c.range[c.range.length - 1]
+      dif = dif > 3
       // connected geo-morph system
-      let system = poi || (dif > 0.75 && dif < 1.25)
+      let system = poi && dif
 
       // tertiary surface point clouds (weather, constellations)
-      if (c.label === 'pos') {
+      if (c.label === 'med') {
+        // if no stars, sort is off
         let cloud = system ? 'static' : 'dynamic'
         seg.emit[cloud].push(c.point)
+        return
       }
 
       // class-specific path transform
@@ -751,8 +752,8 @@ const vlay = {
       function unit(idx) {
         const d = vlay.v.R / 4 // constant
         let k = 0
-        //k += c.depth[idx] // rgba range
-        //k += c.forms / 2 // domain-weighted scale
+        //k += c.range[idx] // rgba range
+        //k += c.scale / 2 // domain-weighted scale
         //k += c.system / 2 // domain extent
         //k += c.label === 'neg' ? 3 : 0.33 // category
         return d + k
@@ -785,9 +786,9 @@ const vlay = {
       let hull = false
       if (c.idx >= 1) {
         // TO-DO: after updates corrected "normal" values,
-        // can hull be c.forms, tube or not, pos/neg or not?
-        let tolerance = c.label === 'neg' ? c.system * 1.5 : c.forms
-        hull = c.depth[c.idx - 1] / c.depth[c.idx] < tolerance
+        // can hull be c.scale, tube or not, pos/neg or not?
+        let tolerance = c.label === 'neg' ? c.system * 1.5 : c.scale * 1.5
+        hull = c.range[c.idx - 1] / c.range[c.idx] < tolerance
       }
 
       if (hull) {
@@ -825,7 +826,6 @@ const vlay = {
 
       // merge index
       c.idx++
-      return buf
     }
 
     function wrap(geo, c) {
@@ -833,7 +833,7 @@ const vlay = {
       let pos = geo.getAttribute('position')
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.count * 3), 3))
       let col = geo.getAttribute('color')
-      // vertex color from depth
+      // vertex color from range
       const range = vlay.v.R * 4
       for (let i = 0; i < pos.count; i++) {
         let v3 = new THREE.Vector3()
@@ -894,7 +894,7 @@ const vlay = {
     })
 
     // output
-    opt.group.userData = { seg: seg.cluster }
+    opt.group.userData = { seg: seg.count }
     // update r3f
     vlay.v.csg.update = true
     vlay.v.state?.invalidate()
