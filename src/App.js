@@ -9,7 +9,6 @@ import { OrbitControls, MeshReflectorMaterial } from '@react-three/drei'
 import { Brush, Subtraction } from '@react-three/csg'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { TeapotGeometry } from 'three/examples/jsm/geometries/TeapotGeometry.js'
-
 //
 
 export default function App() {
@@ -76,7 +75,7 @@ function CSG() {
   //let geo = new THREE.TorusKnotGeometry(vlay.v.R * 2, vlay.v.R / 2, vlay.v.LOD * 32, 32)
   //let geo = new TeapotGeometry(vlay.v.R * 2, vlay.v.LOD * 4)
 
-  geo = mergeVertices(geo, vlay.v.R / 4)
+  geo = mergeVertices(geo, vlay.v.R / 8)
 
   //
   geo.userData.pos = geo.getAttribute('position').clone()
