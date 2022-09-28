@@ -1,5 +1,5 @@
 # vlay
-3d object projects geometric systems it infers from texture raycast. 
+3d object projects geometric topography it infers from texture raycast. 
 - classify: elevation, connected system
 - visualize: volume, scale, relationship
 
