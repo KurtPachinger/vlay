@@ -3,7 +3,7 @@
 - fit weighted estimate of: median/positive/negative, connected system, proximity
 - generate volumetric environment, secondary detail, meta blend
 
-The result is a verifiable blend, firmly seeded in local space. Generative details may be reproduced from a small key, motion texture, or any practial resource. Applications range from fantasy terrain to atmospheric effects.
+Local space is used to seed a verifiable result. Generative details may be reproduced from a small key, motion texture, or any practial resource. Applications range from fantasy terrain to atmospheric effects.
 
 ## texture to topology
 
