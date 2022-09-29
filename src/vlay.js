@@ -76,27 +76,18 @@ const vlay = {
     vlay.gcut()
   },
   util: {
-    num: function (num, o = {}) {
-      o.pre = o.pre || (num < 0 ? '-' : '+')
-      o.pad = o.pad >= 0 ? o.pad : 3
-      o.fix = o.fix >= 0 ? o.fix : 8
-      //o.n = o.n || true
+    num: function (num, opt = {}) {
+      opt.pre = opt.pre || (num < 0 ? '-' : '+')
+      opt.pad = opt.pad >= 0 ? opt.pad : 3
+      opt.fix = opt.fix >= 0 ? opt.fix : 8
+      //opt.n = opt.n || true
       // format
       let n = Number(Math.abs(num))
-      n = o.pre + String(n.toFixed(o.fix)).padStart(o.pad + o.fix + 1, '0')
-      if (!o.s) {
+      n = opt.pre + String(n.toFixed(opt.fix)).padStart(opt.pad + opt.fix + 1, '0')
+      if (!opt.s) {
         n = parseFloat(n)
       }
       return n
-    },
-    gen: function (id, uei = 1) {
-      // uid from seed (from last or root)
-      let S = vlay.v.uid[id]
-      S = S ? S ** 1.5 : ((Math.PI - 3) * 5e11) / vlay.v.opt.seed
-      S = Number((S * uei).toFixed().slice(-8))
-      // output
-      vlay.v.uid[id] = S
-      return S
     },
     reset: function (sel) {
       if (sel && sel.type === 'Group') {
@@ -349,23 +340,23 @@ const vlay = {
             camera.lookAt(new THREE.Vector3(0, 0, 0))
 
             // dynamic
-            if (vlay.v.particles) {
-              const positions = vlay.v.particles.geometry.attributes.position.array
+            if (vlay.v.emit) {
+              const positions = vlay.v.emit.geometry.attributes.position.array
               let origin = new THREE.Vector3(0, 0, 0)
               for (let i = 0; i < positions.length; i += 3) {
                 let pos = new THREE.Vector3(positions[i + 0], positions[i + 1], positions[i + 2])
-                if (pos.distanceTo(origin) < vlay.v.R * 2) {
-                  positions[i + 0] *= 2
-                  positions[i + 1] *= 2
-                  positions[i + 2] *= 2
+                if (pos.distanceTo(origin) > vlay.v.R * 8 * 2) {
+                  positions[i + 0] /= 2
+                  positions[i + 1] /= 2
+                  positions[i + 2] /= 2
                 } else {
-                  positions[i + 0] *= 0.99
-                  positions[i + 1] *= 0.99
-                  positions[i + 2] *= 0.99
+                  positions[i + 0] *= 1.001
+                  positions[i + 1] *= 1.001
+                  positions[i + 2] *= 1.001
                 }
               }
 
-              vlay.v.particles.geometry.attributes.position.needsUpdate = true
+              vlay.v.emit.geometry.attributes.position.needsUpdate = true
             }
 
             if (vlay.v.opt.demo) {
@@ -552,10 +543,10 @@ const vlay = {
     function scale(m, point) {
       // accumulate for mesh transform
       Object.keys(m.tri).forEach(function (corner) {
-        let index = m.idx[corner]
-        let accum = opt.accum[index]
+        let cornerIndex = m.idx[corner]
+        let accum = opt.accum[cornerIndex]
         if (!accum) {
-          accum = opt.accum[index] = { n: 0, scale: m.scale, point: point }
+          accum = opt.accum[cornerIndex] = { n: 0, scale: m.scale, point: point }
         }
 
         accum.scale = avg(accum.n, m.scale, accum.scale)
@@ -605,7 +596,7 @@ const vlay = {
       // from normal
       m.tri.getNormal(dir)
       sample(m, m.mid, dir)
-      // from center
+      // from midpoint
       m.moment = true
       sample(m, ctr, dir.subVectors(m.mid, ctr).normalize())
     }
@@ -693,7 +684,7 @@ const vlay = {
         c.label = count.pos >= count.neg ? 'pos' : 'neg'
       }
 
-      console.log('-', c, c.scale, drift)
+      //console.log('-', c, c.scale, drift)
       profile(c)
     }
 
@@ -709,7 +700,7 @@ const vlay = {
       // tertiary surface point clouds (weather, constellations)
       if (c.label === 'med') {
         // if no stars, sort is off
-        let cloud = system ? 'static' : 'dynamic'
+        let cloud = !system ? 'static' : 'dynamic'
         seg.emit[cloud].push(c.point)
         return
       }
@@ -869,27 +860,27 @@ const vlay = {
       opt.group.add(feat)
     })
 
-    Object.keys(seg.emit).forEach(function (cloud) {
-      // parse points: static, dynamic
-      let clouds = seg.emit[cloud].flat()
-      const points = new Float32Array(clouds.length * 3)
-      for (let i = 0; i < clouds.length; i++) {
-        let v3 = clouds[i]
+    Object.keys(seg.emit).forEach(function (label) {
+      // parse points: static, dynamic (from medium)
+      let segments = seg.emit[label].flat()
+      const points = new Float32Array(segments.length * 3)
+      for (let i = 0; i < segments.length; i++) {
+        let v3 = segments[i]
         points.set([v3.x, v3.y, v3.z], i * 3)
       }
       // geometry
-      const pointCloud = new THREE.BufferGeometry()
-      pointCloud.setAttribute('position', new THREE.BufferAttribute(points, 3))
-      let particles = new THREE.Points(pointCloud, vlay.mat.emit)
-      particles.name = cloud
+      const particles = new THREE.BufferGeometry()
+      particles.setAttribute('position', new THREE.BufferAttribute(points, 3))
+      let emitter = new THREE.Points(particles, vlay.mat.emit)
+      emitter.name = label
       // parameters
-      let scale = cloud === 'static' ? 8 : 1
-      particles.scale.multiplyScalar(scale)
+      let scale = label === 'static' ? 8 : 6
+      emitter.scale.multiplyScalar(scale)
 
-      opt.group.add(particles)
+      opt.group.add(emitter)
 
-      if (cloud === 'dynamic') {
-        vlay.v.particles = particles
+      if (label === 'dynamic') {
+        vlay.v.emit = emitter
       }
     })
 
