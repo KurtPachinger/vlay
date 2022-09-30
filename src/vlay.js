@@ -92,7 +92,6 @@ const vlay = {
     reset: function (sel) {
       if (sel && sel.type === 'Group') {
         // three
-        vlay.v.uid[sel.name] = null
         let els = sel.children
         for (let i in els) {
           let el = els[i]
@@ -133,8 +132,9 @@ const vlay = {
     },
     remap: function (files) {
       //console.log(files)
-      if (files.length === 0 || (files.length !== 1 && files.length % 6 !== 0)) {
-        return 'artboard(s)...?'
+      if (files.length !== 1 && files.length !== 6) {
+        console.log('artboards...?')
+        return false
       }
 
       vlay.util.reset('boxmap')
@@ -156,6 +156,7 @@ const vlay = {
           for (let j = 0; j < crop; j++) {
             let xy = false
             let name
+
             if (crop === 6) {
               // coords percent
               let face = vlay.mat.xyz[j]
@@ -173,18 +174,23 @@ const vlay = {
             if (crop === 6) {
               cm.push([j + '_' + name, canvas])
             } else {
-              // cubemap face from filename
               name = file.name.toString().toLowerCase()
+              // cubemap face from filename
               for (let k = 0; k < xyz.length; k++) {
-                let match = name.search(xyz[k])
-                if (match > -1) {
-                  let idx = Math.floor(vlay.mat.xyz.length * (k / xyz.length))
-                  let face = vlay.mat.xyz[idx][0]
+                let match = name.search(xyz[k]) > -1
+                let searchEnd = k === xyz.length - 1
+                if (match || searchEnd) {
+                  let idx, face
+                  if (match) {
+                    idx = Math.floor(vlay.mat.xyz.length * (k / xyz.length))
+                    face = vlay.mat.xyz[idx][0]
+                  } else {
+                    idx = cm.length
+                    face = vlay.mat.xyz[idx][0]
+                  }
                   name = [idx, face, name].join('_')
                   cm.push([name, canvas])
                   break
-                } else if (k === xyz.length) {
-                  cm.push([name, canvas])
                 }
               }
             }
@@ -195,11 +201,14 @@ const vlay = {
           }
 
           // await cubemap, sort, and proceed
+          cm.sort()
           if (cm.length >= files.length) {
-            cm.sort()
             document.getElementById('boxmap').appendChild(fragment)
             vlay.v.opt.uid = false
-            vlay.gcut({ img: cm, uid: 'img' })
+            let seed = files[0].name
+            seed = [files.length, seed.slice(0, seed.lastIndexOf('.'))].join('_')
+            vlay.gcut({ img: cm, uid: 'img', s: seed })
+          } else {
           }
 
           img = null
@@ -271,14 +280,12 @@ const vlay = {
       gui
         .add(vlay.v.opt, 'seed', 0, 1)
         .step(0.05)
-        .listen()
         .onFinishChange(function (n) {
           vlay.gcut({ s: n })
         })
       gui
         .add(vlay.v.opt, 'iter', 1, 10)
         .step(1)
-        .listen()
         .onFinishChange(function (n) {
           vlay.gcut({ i: n })
         })
@@ -305,47 +312,45 @@ const vlay = {
 
       // DEMO MODE
       gui.add(vlay.v.opt, 'demo').onChange(function (n) {
-        //window.cancelAnimationFrame(vlay.v.step)
         vlay.v.state.frameloop = n ? 'always' : 'demand'
         vlay.v.state.invalidate()
-        if (n) {
-          vlay.v.step = function (timestamp) {
-            // settings
-            const R = vlay.v.R * 8
-            function rand(value) {
-              let rand = vlay.util.num(value * Math.random())
-              return Number(rand)
+
+        if (!n) {
+          // pause demo
+          vlay.v.state.gl.setAnimationLoop(null)
+          vlay.v.next = null
+        } else {
+          // play demo (use seed)
+          vlay.v.opt.uid = true
+          vlay.v.state.gl.setAnimationLoop((timestamp) => {
+            // tick
+            if (!vlay.v.next || vlay.v.next < timestamp) {
+              vlay.v.next = timestamp + 15_000
+              console.log('demo')
+              // random values
+              vlay.v.opt.seed = vlay.util.num(1 * Math.random(), { fix: 2 })
+              vlay.v.opt.iter = vlay.util.num(9 * Math.random() + 1, { fix: 0 })
+              vlay.v.opt.view = vlay.util.num(3 * Math.random(), { fix: 0 })
+              vlay.gcut()
             }
 
-            let limit = 15_000
-            if (!vlay.v.demoS || vlay.v.demoS < timestamp) {
-              vlay.v.demoS = timestamp + limit
-              console.log('demo')
-              // presets
-              vlay.v.opt.uid = true
-              // view
-              vlay.v.opt.seed = rand(1) + 0.001
-              vlay.v.opt.iter = Math.round(rand(9)) + 1
-              vlay.v.opt.view = Math.round(rand(3))
-              vlay.gcut()
-              // r3f
-              //vlay.v.state.invalidate()
-            }
+            // ANIMATE...
+            const R = vlay.v.R * 8
+            let origin = new THREE.Vector3(0, 0, 0)
 
             // camera
             let camera = vlay.v.state.camera
             const time = -performance.now() * 0.0003
             camera.position.x = R * Math.cos(time)
             camera.position.z = R * Math.sin(time)
-            camera.lookAt(new THREE.Vector3(0, 0, 0))
+            camera.lookAt(origin)
 
             // dynamic
             if (vlay.v.emit) {
               const positions = vlay.v.emit.geometry.attributes.position.array
-              let origin = new THREE.Vector3(0, 0, 0)
               for (let i = 0; i < positions.length; i += 3) {
                 let pos = new THREE.Vector3(positions[i + 0], positions[i + 1], positions[i + 2])
-                if (pos.distanceTo(origin) > vlay.v.R * 8 * 2) {
+                if (pos.distanceTo(origin) > R * 2) {
                   positions[i + 0] /= 2
                   positions[i + 1] /= 2
                   positions[i + 2] /= 2
@@ -355,19 +360,9 @@ const vlay = {
                   positions[i + 2] *= 1.001
                 }
               }
-
               vlay.v.emit.geometry.attributes.position.needsUpdate = true
             }
-
-            if (vlay.v.opt.demo) {
-              window.requestAnimationFrame(vlay.v.step)
-            } else {
-              window.cancelAnimationFrame(vlay.v.step)
-            }
-          }
-
-          window.requestAnimationFrame(vlay.v.step)
-          //
+          })
         }
       })
     },
@@ -398,17 +393,24 @@ const vlay = {
       })
     }
   },
-  gcut: async function (opt = {}) {
+  gcut: function (opt = {}) {
     console.log('gcut')
 
     if (!opt.init) {
       //let test = await vlay.v.state.performance.regress()
       // OPTIONS
       opt.init = true
-      opt.i = opt.i || vlay.v.opt.iter
       opt.s = opt.s || vlay.v.opt.seed
-      opt.uid = opt.uid || (vlay.v.opt.uid ? 'rnd' : 'img')
-      //opt.uid = [opt.uid, opt.s, opt.p].join('_')
+      opt.i = opt.i || vlay.v.opt.iter
+      let images = !vlay.v.opt.uid && (opt.img || vlay.mat.map.name === 'img')
+      opt.uid = opt.uid || (images ? 'img' : 'rnd')
+      // uei is the variant of uid instance, with initial seed
+      opt.uei = [opt.s, opt.i].join('_')
+      if (vlay.v.uid[opt.uid] === opt.uei) {
+        console.log('abort, uei same')
+        return
+      }
+      vlay.v.uid[opt.uid] = opt.uei
 
       // RESET
       //vlay.util.reset(vlay.v.out.current.getObjectByName(opt.uid))
@@ -441,13 +443,18 @@ const vlay = {
     }
 
     if (opt.i > 0) {
-      opt.geo = await vlay.morph(opt)
-      //recurse
-      opt.i--
-      vlay.gcut(opt)
+      setTimeout(function () {
+        if (vlay.v.uid[opt.uid] === opt.uei) {
+          opt.geo = vlay.morph(opt)
+          //recurse
+          opt.i--
+          vlay.gcut(opt)
+        } else {
+          console.log('abort, uei change')
+        }
+      }, 0)
     } else {
       // OUTPUT
-
       const pos = opt.env.getAttribute('position')
       for (let i = 0; i < opt.accum.length; i++) {
         // transform mesh surface from accumulate
@@ -480,6 +487,10 @@ const vlay = {
   morph: function (opt) {
     //console.log('morph', opt)
     // targets
+    let target = opt.group.getObjectByName('box')
+    if (!target) {
+      return
+    }
     opt.geo.computeBoundingSphere()
     const ctr = opt.geo.boundingSphere.center
     const ray = new THREE.Raycaster()
@@ -491,11 +502,11 @@ const vlay = {
     // CUBEMAP PYR
     let blurs = []
     let k = 1 - (opt.i - 1) / vlay.v.opt.iter
-    let target = opt.group.getObjectByName('box')
-    for (let i = 0; i < target.material.length; i++) {
-      let material = target.material[i].map.source.data
+    let cubeTexture = target.material
+    for (let i = 0; i < cubeTexture.length; i++) {
+      let material = cubeTexture[i].map.source.data
       let blur = document.createElement('canvas')
-      let ctx = blur.getContext('2d')
+      let ctx = blur.getContext('2d', { willReadFrequently: true })
       blur.width = blur.height = Math.round((material.width * k) / 2)
       ctx.drawImage(material, 0, 0, blur.width, blur.height)
       blurs.push(blur)
@@ -510,7 +521,7 @@ const vlay = {
         // cubemap sample
         const uv = intersect.uv
         const blur = blurs[intersect.face.materialIndex]
-        const ctx = blur.getContext('2d')
+        const ctx = blur.getContext('2d', { willReadFrequently: true })
         const rgba = ctx.getImageData(blur.width * uv.x, blur.height - blur.height * uv.y, 1, 1).data
 
         if (rgba[3] !== 0) {
@@ -891,7 +902,7 @@ const vlay = {
     vlay.v.state?.invalidate()
   },
   matgen: function (opt) {
-    let cubemap = []
+    let cubeTexture = []
     let fragment = new DocumentFragment()
     let ts = Date.now()
 
@@ -902,30 +913,29 @@ const vlay = {
       let iter = Math.pow(2, Math.round(opt.i / 2)) * 8
       let exp = Math.min(iter, vlay.mat.MAX)
       rnd = seedmap(vlay.v.opt.seed, exp, 6)
-      vlay.v.uid[opt.uid] = rnd.seed
+      //opt.s = rnd.seed
     }
 
     for (let i = 0; i < 6; i++) {
-      let tex = opt.img ? opt.img[i][1] : rnd.map[i]
-      let terrain
+      let canvas = opt.img ? opt.img[i][1] : rnd.map[i]
       if (!opt.img) {
-        tex.id = tex.title = 'rnd_' + vlay.mat.xyz[i][0] + '_' + ts
-        fragment.appendChild(tex)
+        canvas.id = canvas.title = 'rnd_' + vlay.mat.xyz[i][0] + '_' + ts
+        fragment.appendChild(canvas)
       }
 
-      terrain = new THREE.CanvasTexture(tex)
-      terrain.minFilter = THREE.NearestFilter
-      terrain.magFilter = THREE.NearestFilter
+      let texture = new THREE.CanvasTexture(canvas)
+      texture.minFilter = THREE.NearestFilter
+      texture.magFilter = THREE.NearestFilter
 
       let mat = vlay.mat.img.clone()
       mat.name = opt.img ? 'boxmap' : 'genmap'
-      mat.map = terrain
+      mat.map = texture
 
-      cubemap.push(mat)
+      cubeTexture.push(mat)
     }
     document.getElementById('genmap').appendChild(fragment)
 
-    return cubemap
+    return cubeTexture
   }
 }
 
