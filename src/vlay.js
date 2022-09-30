@@ -40,9 +40,9 @@ const vlay = {
       shininess: 60
     }),
     emit: new THREE.PointsMaterial({
-      size: 2,
+      size: 1.5,
       color: 0xffffff,
-      opacity: 0.33,
+      opacity: 0.5,
       transparent: true
     }),
     xyz: [
@@ -362,9 +362,9 @@ const vlay = {
                   positions[i + 1] /= 2
                   positions[i + 2] /= 2
                 } else {
-                  positions[i + 0] *= 1.001
-                  positions[i + 1] *= 1.001
-                  positions[i + 2] *= 1.001
+                  positions[i + 0] *= 1.002
+                  positions[i + 1] *= 1.002
+                  positions[i + 2] *= 1.002
                 }
               }
               vlay.v.emit.geometry.attributes.position.needsUpdate = true
@@ -895,7 +895,7 @@ const vlay = {
       let emitter = new THREE.Points(particles, vlay.mat.emit)
       emitter.name = label
       // parameters
-      let scale = label === 'static' ? 8 : 6
+      let scale = label === 'static' ? 8 : 4
       emitter.scale.multiplyScalar(scale)
 
       opt.group.add(emitter)
