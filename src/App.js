@@ -18,7 +18,7 @@ export default function App() {
   const R = vlay.v.R * 8
   return (
     <Canvas
-      performance={{ min: 0.1 }}
+      performance={{ min: 0.2 }}
       frameloop="demand"
       gl={{ antialias: false }}
       shadows
