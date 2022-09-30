@@ -42,7 +42,7 @@ export default function App() {
           mixStrength={25}
           roughness={1}
           depthScale={0.5}
-          color="#202020"
+          color={0x202020}
           metalness={0.5}
         />
       </mesh>
@@ -71,11 +71,11 @@ function CSG() {
   vlay.v.LOD = Math.round(Math.min(window.innerWidth, window.innerHeight) / 256)
   //vlay.v.LOD = 14
   let neg = new THREE.PlaneGeometry(0, 0)
-  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, vlay.v.LOD * 4)
+  let geo = new THREE.IcosahedronGeometry(vlay.v.R * 2, vlay.v.LOD * 3)
   //let geo = new THREE.TorusKnotGeometry(vlay.v.R * 2, vlay.v.R / 2, vlay.v.LOD * 32, 32)
   //let geo = new TeapotGeometry(vlay.v.R * 2, vlay.v.LOD * 4)
 
-  geo = mergeVertices(geo, vlay.v.R / 8)
+  geo = mergeVertices(geo, vlay.v.R / 4)
 
   //
   geo.userData.pos = geo.getAttribute('position').clone()
