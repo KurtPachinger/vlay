@@ -331,7 +331,7 @@ const vlay = {
               let controllers = vlay.v.gui.controllers
               Object.values(controllers).forEach(function (controller) {
                 if (controller._hasSlider) {
-                  let value = ((controller._max - 1) * Math.random() + 1).toFixed(0.1 / controller._step)
+                  let value = (controller._max * Math.random()).toFixed(0.1 / controller._step)
                   value = vlay.util.num(value, { fix: 2 })
                   vlay.v.opt[controller.name] = value
                   controller.setValue(value)
@@ -488,9 +488,11 @@ const vlay = {
 
       // env defects (pos/neg)
       vlay.segs(opt)
-      let view = vlay.v.gui.controllers.find((prop) => prop.property === 'view')
-      view && view.setValue(vlay.v.opt.view)
     }
+
+    // ...basically on init and opt.iter===0
+    let view = vlay.v.gui.controllers.find((prop) => prop.property === 'view')
+    view.setValue(vlay.v.opt.view)
   },
   morph: function (opt) {
     //console.log('morph', opt)
