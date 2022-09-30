@@ -289,8 +289,8 @@ const vlay = {
         .onFinishChange(function (n) {
           vlay.gcut({ i: n })
         })
-      let preset = gui
-        .add(vlay.v.opt, 'view', 0, 4)
+      gui
+        .add(vlay.v.opt, 'view', 0, 3)
         .step(1)
         .onChange(function (n) {
           let onion = ['box', 'env', 'neg', 'pos', 'CSG', 'points']
@@ -308,7 +308,7 @@ const vlay = {
           vlay.v.state.invalidate()
         })
 
-      vlay.v.opt._preset = preset
+      vlay.v.gui = gui
 
       // DEMO MODE
       gui.add(vlay.v.opt, 'demo').onChange(function (n) {
@@ -328,9 +328,16 @@ const vlay = {
               vlay.v.next = timestamp + 15_000
               console.log('demo')
               // random values
-              vlay.v.opt.seed = vlay.util.num(1 * Math.random(), { fix: 2 })
-              vlay.v.opt.iter = vlay.util.num(9 * Math.random() + 1, { fix: 0 })
-              vlay.v.opt.view = vlay.util.num(3 * Math.random(), { fix: 0 })
+              let controllers = vlay.v.gui.controllers
+              Object.values(controllers).forEach(function (controller) {
+                if (controller._hasSlider) {
+                  let value = ((controller._max - 1) * Math.random() + 1).toFixed(0.1 / controller._step)
+                  value = vlay.util.num(value, { fix: 2 })
+                  vlay.v.opt[controller.name] = value
+                  controller.setValue(value)
+                }
+              })
+
               vlay.gcut()
             }
 
@@ -397,7 +404,6 @@ const vlay = {
     console.log('gcut')
 
     if (!opt.init) {
-      //let test = await vlay.v.state.performance.regress()
       // OPTIONS
       opt.init = true
       opt.s = opt.s || vlay.v.opt.seed
@@ -451,6 +457,7 @@ const vlay = {
           vlay.gcut(opt)
         } else {
           console.log('abort, uei change')
+          vlay.v.state.performance.regress()
         }
       }, 0)
     } else {
@@ -481,7 +488,8 @@ const vlay = {
 
       // env defects (pos/neg)
       vlay.segs(opt)
-      vlay.v.opt._preset?.setValue(vlay.v.opt.view)
+      let view = vlay.v.gui.controllers.find((prop) => prop.property === 'view')
+      view && view.setValue(vlay.v.opt.view)
     }
   },
   morph: function (opt) {
